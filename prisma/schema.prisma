@@ -1,0 +1,56 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model ProductOrder {
+  id             String              @id @default(uuid())
+  name           String
+  status         String              // PENDING, RUNNING, COMPLETED, SUSPENDED
+  quantity       Int                 @default(0)
+  targetQuantity Int
+  startDate      DateTime?
+  endDate        DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  inspections    QualityInspection[]
+}
+
+model QualityInspection {
+  id            String       @id @default(uuid())
+  orderId       String
+  order         ProductOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  inspectorName String
+  status        String       // PENDING, APPROVED, REJECTED
+  defectCount   Int          @default(0)
+  notes         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+}
+
+model Machine {
+  id              String   @id @default(uuid())
+  name            String
+  status          String   // IDLE, ACTIVE, MAINTENANCE, ERROR
+  efficiency      Float    // % efficiency
+  temperature     Float    // Celsius
+  uptime          Float    // % uptime
+  lastMaintenance DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model SystemLog {
+  id        String   @id @default(uuid())
+  orderId   String?
+  action    String
+  details   String
+  severity  String   // INFO, WARNING, ERROR
+  timestamp DateTime @default(now())
+}
