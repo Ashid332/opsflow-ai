@@ -10,7 +10,8 @@ import {
   Activity, 
   Menu, 
   X,
-  Factory
+  Factory,
+  FileText
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -18,8 +19,9 @@ export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(false);
 
   const navItems = [
-    { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-    { name: 'Quality Review', href: '/review', icon: ShieldCheck },
+    { name: 'Document Center', href: '/', icon: FileText },
+    { name: 'Analytics Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'Review Queue', href: '/review', icon: ShieldCheck },
     { name: 'Audit History', href: '/history', icon: History },
   ];
 

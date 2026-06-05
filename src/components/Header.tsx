@@ -28,8 +28,8 @@ export default function Header() {
         {/* Spacer for mobile menu toggle button */}
         <div className="w-10 lg:hidden" />
         <div>
-          <h2 className="text-lg font-bold text-white tracking-tight">Telemetry Dashboard</h2>
-          <p className="text-xs text-gray-400 hidden sm:block">Real-time AI monitoring & workflow control</p>
+          <h2 className="text-lg font-bold text-white tracking-tight">AI Document Processing</h2>
+          <p className="text-xs text-gray-400 hidden sm:block">Intelligent extraction, validation, & release</p>
         </div>
       </div>
 

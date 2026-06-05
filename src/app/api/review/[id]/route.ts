@@ -8,10 +8,10 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { status, notes, inspectorName, defectCount } = body;
+    const { status, inspectorName, orderName, targetQuantity, machineName, shiftName, comments } = body;
 
     if (!status || !['APPROVED', 'REJECTED'].includes(status)) {
-      return NextResponse.json({ error: 'Invalid inspection status' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid review status' }, { status: 400 });
     }
 
     const inspection = await prisma.qualityInspection.findUnique({
@@ -23,33 +23,90 @@ export async function POST(
       return NextResponse.json({ error: 'Inspection not found' }, { status: 404 });
     }
 
+    let currentMeta = {
+      fileName: 'document.pdf',
+      originalText: '',
+      shift: shiftName || 'Morning Shift',
+      machineName: machineName || 'Assembly Line A (CNC)',
+      confidence: { name: 1.0, targetQuantity: 1.0, machineName: 1.0, shift: 1.0 },
+      validationErrors: [] as string[],
+    };
+
+    try {
+      if (inspection.notes) {
+        const parsed = JSON.parse(inspection.notes);
+        currentMeta = { ...currentMeta, ...parsed };
+      }
+    } catch (e) {
+      // Use fallback metadata
+    }
+
+    // Update metadata with corrected values
+    currentMeta.shift = shiftName || currentMeta.shift;
+    currentMeta.machineName = machineName || currentMeta.machineName;
+
+    // Human edits set confidence score for edited fields to 1.0
+    if (orderName) currentMeta.confidence.name = 1.0;
+    if (targetQuantity) currentMeta.confidence.targetQuantity = 1.0;
+    currentMeta.confidence.machineName = 1.0;
+    currentMeta.confidence.shift = 1.0;
+
+    // Re-run validation rules on the newly corrected fields
+    const validationErrors: string[] = [];
+    const parsedQty = targetQuantity !== undefined ? parseInt(targetQuantity, 10) : inspection.order.targetQuantity;
+    const finalMachineName = machineName || currentMeta.machineName;
+    const finalOrderName = orderName || inspection.order.name;
+
+    if (parsedQty > 1000) {
+      validationErrors.push(`Blocker: Target quantity (${parsedQty}) exceeds standard machine batch capacity of 1000 units.`);
+    }
+
+    const dbMachines = await prisma.machine.findMany();
+    const machineExists = dbMachines.some(m => m.name.toLowerCase() === finalMachineName.toLowerCase());
+    if (!machineExists) {
+      validationErrors.push(`Blocker: Assigned machine '${finalMachineName}' is not registered in active plant assets.`);
+    }
+
+    if (!/#\d+/.test(finalOrderName)) {
+      validationErrors.push(`Warning: Order name lacks a specific tracking identifier (e.g. #ID).`);
+    }
+
+    currentMeta.validationErrors = validationErrors;
+
+    // Update inspection record
     const updatedInspection = await prisma.qualityInspection.update({
       where: { id },
       data: {
         status,
-        notes: notes || inspection.notes,
-        inspectorName: inspectorName || inspection.inspectorName,
-        defectCount: defectCount !== undefined ? parseInt(defectCount, 10) : inspection.defectCount,
+        inspectorName: inspectorName || 'QA Engineer',
+        defectCount: validationErrors.filter(e => e.startsWith('Blocker:')).length,
+        notes: JSON.stringify(currentMeta),
       },
     });
 
     // Update order status based on review decision
     let orderStatus = inspection.order.status;
     if (status === 'APPROVED') {
-      orderStatus = 'COMPLETED';
+      // If approved, check if blockers are still present.
+      const hasBlockers = validationErrors.some(e => e.startsWith('Blocker:'));
+      orderStatus = hasBlockers ? 'SUSPENDED' : 'COMPLETED';
     } else if (status === 'REJECTED') {
       orderStatus = 'SUSPENDED';
     }
 
     await prisma.productOrder.update({
       where: { id: inspection.orderId },
-      data: { status: orderStatus },
+      data: {
+        name: finalOrderName,
+        targetQuantity: parsedQty,
+        status: orderStatus,
+      },
     });
 
     // Create system log
-    const action = status === 'APPROVED' ? 'INSPECTION_APPROVE' : 'INSPECTION_REJECT';
+    const action = status === 'APPROVED' ? 'DOC_VALIDATE' : 'DOC_REJECT';
     const severity = status === 'APPROVED' ? 'INFO' : 'ERROR';
-    const details = `Quality inspection for order '${inspection.order.name}' was ${status} by ${inspectorName || 'Unknown Inspector'}. Defects: ${defectCount || 0}. Notes: ${notes || 'None'}`;
+    const details = `Document '${currentMeta.fileName}' was ${status} by ${inspectorName || 'QA Engineer'}. Errors remaining: ${validationErrors.length}. Comments: ${comments || 'None'}`;
 
     await prisma.systemLog.create({
       data: {

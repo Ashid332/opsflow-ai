@@ -72,7 +72,7 @@ export default function HistoryPage() {
             <History className="text-blue-500" />
             Audit History Explorer
           </h2>
-          <p className="text-xs text-gray-400">Search, filter, and inspect previous production run events and alerts</p>
+          <p className="text-xs text-gray-400">Search, filter, and inspect previous document extraction and validation logs</p>
         </div>
         <button
           onClick={fetchLogs}

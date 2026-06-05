@@ -1,368 +1,597 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
-  Play, 
-  Activity, 
-  AlertTriangle, 
-  CheckCircle, 
-  Cpu, 
-  RefreshCw,
-  Clock,
-  Terminal,
-  ChevronRight
+  UploadCloud, 
+  FileText, 
+  CheckCircle2, 
+  XCircle, 
+  AlertCircle, 
+  Loader2, 
+  Sparkles, 
+  Eye, 
+  ShieldCheck, 
+  ArrowRight,
+  ArrowLeft,
+  ChevronRight,
+  FileSpreadsheet
 } from 'lucide-react';
-import FileUpload from '@/components/FileUpload';
-import { MachineEfficiencyChart, PlantProductionChart } from '@/components/Charts';
 
-interface Metrics {
-  avgEfficiency: number;
-  defectRate: number;
-  activeRuns: number;
-  pendingRuns: number;
-  completedRuns: number;
-  alertCount: number;
-}
-
-interface Machine {
+interface ExtractedData {
   id: string;
-  name: string;
-  status: 'ACTIVE' | 'IDLE' | 'MAINTENANCE' | 'ERROR';
-  efficiency: number;
-  temperature: number;
-  uptime: number;
-  lastMaintenance: string;
+  orderId: string;
+  inspectorName: string;
+  status: string;
+  defectCount: number;
+  notes: string;
+  order: {
+    id: string;
+    name: string;
+    targetQuantity: number;
+    status: string;
+  };
 }
 
-interface ProductOrder {
-  id: string;
-  name: string;
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'SUSPENDED';
-  quantity: number;
-  targetQuantity: number;
-  startDate?: string;
-  endDate?: string;
-}
+export default function DocumentCenter() {
+  // Workflow states: 'upload' | 'scanning' | 'review'
+  const [workflowState, setWorkflowState] = useState<'upload' | 'scanning' | 'review'>('upload');
+  const [scanStep, setScanStep] = useState(0);
+  const [file, setFile] = useState<File | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [extractedData, setExtractedData] = useState<ExtractedData | null>(null);
+  
+  // OCR Editable Fields
+  const [inspectorName, setInspectorName] = useState('');
+  const [orderName, setOrderName] = useState('');
+  const [targetQuantity, setTargetQuantity] = useState(0);
+  const [machineName, setMachineName] = useState('');
+  const [shiftName, setShiftName] = useState('Morning Shift');
+  const [comments, setComments] = useState('');
 
-interface SystemLog {
-  id: string;
-  action: string;
-  details: string;
-  severity: 'INFO' | 'WARNING' | 'ERROR';
-  timestamp: string;
-}
+  // UI state
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-export default function Dashboard() {
-  const [metrics, setMetrics] = useState<Metrics>({
-    avgEfficiency: 0,
-    defectRate: 0,
-    activeRuns: 0,
-    pendingRuns: 0,
-    completedRuns: 0,
-    alertCount: 0
-  });
-  const [machines, setMachines] = useState<Machine[]>([]);
-  const [orders, setOrders] = useState<ProductOrder[]>([]);
-  const [logs, setLogs] = useState<SystemLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [simulating, setSimulating] = useState(false);
-  const [autoSimulate, setAutoSimulate] = useState(false);
+  const scanMessages = [
+    'Initializing OCR Document Scanner...',
+    'Performing AI Text Line Detection & Bounding-Box Alignments...',
+    'Extracting Entities (Batch Name, Machine ID, Quantity)...',
+    'Running Validation Rules Engine...'
+  ];
 
-  const fetchDashboardData = useCallback(async () => {
-    try {
-      const response = await fetch('/api/dashboard');
-      if (response.ok) {
-        const data = await response.json();
-        setMetrics(data.metrics);
-        setMachines(data.machines);
-        setOrders(data.orders);
-        setLogs(data.logs);
-      }
-    } catch (err) {
-      console.error('Error fetching dashboard data:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
-
-  // Handle telemetry step simulation
-  const handleSimulateStep = async () => {
-    if (simulating) return;
-    setSimulating(true);
-    try {
-      const response = await fetch('/api/telemetry/simulate', { method: 'POST' });
-      if (response.ok) {
-        await fetchDashboardData();
-      }
-    } catch (err) {
-      console.error('Error running telemetry simulation:', err);
-    } finally {
-      setSimulating(false);
+  // Drag and drop handlers
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
     }
   };
 
-  // Auto-simulate polling loop (ticks every 4 seconds when toggled)
-  useEffect(() => {
-    if (!autoSimulate) return;
-    const interval = setInterval(() => {
-      handleSimulateStep();
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [autoSimulate, simulating]);
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
 
-  if (loading) {
-    return (
-      <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
-        <RefreshCw className="h-8 w-8 text-blue-500 animate-spin" />
-        <p className="text-sm text-gray-400">Loading live plant data...</p>
-      </div>
-    );
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const droppedFile = e.dataTransfer.files[0];
+      validateAndProcessFile(droppedFile);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      validateAndProcessFile(e.target.files[0]);
+    }
+  };
+
+  const validateAndProcessFile = (selectedFile: File) => {
+    const ext = selectedFile.name.split('.').pop()?.toLowerCase();
+    if (['json', 'csv', 'txt', 'pdf', 'png', 'jpg', 'jpeg'].includes(ext || '')) {
+      setFile(selectedFile);
+      setErrorMsg('');
+      triggerScanningFlow(selectedFile);
+    } else {
+      setErrorMsg('Unsupported file type. Please upload a .pdf, .csv, .json, or image file.');
+    }
+  };
+
+  const triggerScanningFlow = async (uploadFile: File) => {
+    setWorkflowState('scanning');
+    setScanStep(0);
+
+    // Animate the OCR scanning steps
+    const stepInterval = setInterval(() => {
+      setScanStep(prev => {
+        if (prev >= 3) {
+          clearInterval(stepInterval);
+          return 3;
+        }
+        return prev + 1;
+      });
+    }, 900);
+
+    // Call API simultaneously
+    const formData = new FormData();
+    formData.append('file', uploadFile);
+
+    try {
+      const response = await fetch('/api/orders/import', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Delay transition slightly to finish animation feel
+        setTimeout(() => {
+          setExtractedData(data.inspection);
+          setOrderName(data.order.name);
+          setTargetQuantity(data.order.targetQuantity);
+          
+          try {
+            const meta = JSON.parse(data.inspection.notes);
+            setMachineName(meta.machineName || 'Assembly Line A (CNC)');
+            setShiftName(meta.shift || 'Morning Shift');
+          } catch (e) {
+            setMachineName('Assembly Line A (CNC)');
+            setShiftName('Morning Shift');
+          }
+
+          setWorkflowState('review');
+        }, 3600);
+      } else {
+        const errData = await response.json();
+        clearInterval(stepInterval);
+        setErrorMsg(errData.error || 'Failed to upload document.');
+        setWorkflowState('upload');
+      }
+    } catch (err) {
+      console.error(err);
+      clearInterval(stepInterval);
+      setErrorMsg('Connection error. Failed to scan document.');
+      setWorkflowState('upload');
+    }
+  };
+
+  // Submit decision
+  const handleSubmitReview = async (status: 'APPROVED' | 'REJECTED') => {
+    if (!extractedData) return;
+    if (!inspectorName.trim()) {
+      alert('Please enter your Inspector Signature before validation.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const response = await fetch(`/api/review/${extractedData.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status,
+          inspectorName,
+          orderName,
+          targetQuantity,
+          machineName,
+          shiftName,
+          comments,
+        }),
+      });
+
+      if (response.ok) {
+        alert(`Document extraction successfully marked as ${status}.`);
+        resetWorkspace();
+      } else {
+        const data = await response.json();
+        alert(data.error || 'Failed to submit validation review.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Failed to validate. Connection error.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetWorkspace = () => {
+    setFile(null);
+    setExtractedData(null);
+    setInspectorName('');
+    setOrderName('');
+    setTargetQuantity(0);
+    setMachineName('');
+    setShiftName('Morning Shift');
+    setComments('');
+    setWorkflowState('upload');
+  };
+
+  // Parsing metadata for rendering
+  let meta = {
+    fileName: 'document.pdf',
+    confidence: { name: 1.0, targetQuantity: 1.0, machineName: 1.0, shift: 1.0 },
+    validationErrors: [] as string[],
+    originalText: ''
+  };
+
+  if (extractedData?.notes) {
+    try {
+      meta = JSON.parse(extractedData.notes);
+    } catch (e) {
+      // Use defaults
+    }
   }
+
+  // Live client-side re-validation preview
+  const liveErrors: string[] = [];
+  if (targetQuantity > 1000) {
+    liveErrors.push(`Blocker: Target quantity (${targetQuantity}) exceeds standard machine batch capacity of 1000 units.`);
+  }
+  if (!machineName.trim()) {
+    liveErrors.push(`Blocker: Machine assignment field is empty.`);
+  }
+  if (!/#\d+/.test(orderName)) {
+    liveErrors.push(`Warning: Order name lacks a specific tracking identifier (e.g. #ID).`);
+  }
+
+  const hasBlockers = liveErrors.some(e => e.startsWith('Blocker:'));
 
   return (
     <div className="space-y-6">
-      {/* Simulation Controls Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-gray-900/40 border border-gray-800 p-4 rounded-xl">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-blue-950 flex items-center justify-center text-blue-400">
-            <Cpu size={18} className={autoSimulate ? 'animate-spin' : ''} />
+      {/* 1. Upload View */}
+      {workflowState === 'upload' && (
+        <div className="max-w-xl mx-auto space-y-4 pt-8">
+          <div className="text-center space-y-2 mb-6">
+            <h2 className="text-2xl font-extrabold text-white tracking-tight flex items-center justify-center gap-2">
+              <Sparkles className="text-blue-500 animate-pulse" />
+              Document Processing Workspace
+            </h2>
+            <p className="text-xs text-gray-400">
+              Upload manufacturing run sheets, logs, or CAD order forms to automatically extract job configurations.
+            </p>
           </div>
-          <div>
-            <h4 className="text-sm font-bold text-white">Live Telemetry Control</h4>
-            <p className="text-xs text-gray-400">Drive the simulator to update orders and machine states</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <button
-            onClick={() => setAutoSimulate(!autoSimulate)}
-            className={`flex-1 sm:flex-none flex items-center justify-center gap-2 py-1.5 px-4 rounded-lg text-xs font-semibold border transition-all ${
-              autoSimulate 
-                ? 'bg-emerald-950 border-emerald-800 text-emerald-400' 
-                : 'bg-gray-950 border-gray-800 text-gray-300 hover:bg-gray-900'
+
+          <div
+            onDragEnter={handleDrag}
+            onDragOver={handleDrag}
+            onDragLeave={handleDrag}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all duration-300 flex flex-col items-center justify-center ${
+              dragActive 
+                ? 'border-blue-500 bg-blue-950/20' 
+                : 'border-gray-800 hover:border-gray-700 bg-[#111827]/40 hover:bg-[#111827]/60'
             }`}
           >
-            <Activity size={14} className={autoSimulate ? 'animate-pulse' : ''} />
-            {autoSimulate ? 'Sim: ACTIVE (4s)' : 'Start Auto-Sim'}
-          </button>
-          
-          <button
-            onClick={handleSimulateStep}
-            disabled={simulating}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 py-1.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white text-xs font-semibold shadow-md shadow-blue-600/10 active:scale-95 transition-all"
-          >
-            <Play size={13} fill="currentColor" />
-            {simulating ? 'Simulating...' : 'Simulate Telemetry Step'}
-          </button>
-          
-          <button
-            onClick={fetchDashboardData}
-            className="p-1.5 rounded-lg bg-gray-900 border border-gray-800 text-gray-400 hover:text-white transition-colors"
-            title="Refresh dashboard"
-          >
-            <RefreshCw size={14} />
-          </button>
-        </div>
-      </div>
-
-      {/* KPI Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Plant OEE */}
-        <div className="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-xs font-semibold text-gray-400 tracking-wide uppercase">Plant OEE</span>
-            <span className="p-1.5 rounded-lg bg-blue-950 text-blue-400"><Activity size={14} /></span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept=".pdf,.csv,.json,.txt,.png,.jpg,.jpeg"
+              onChange={handleFileSelect}
+            />
+            <div className="p-4 rounded-full bg-blue-950/40 text-blue-400 mb-4 border border-blue-900/40">
+              <UploadCloud size={32} className="animate-bounce" style={{ animationDuration: '3s' }} />
+            </div>
+            <h4 className="text-sm font-bold text-gray-200">Drag & Drop file to start AI Extraction</h4>
+            <p className="text-xs text-gray-400 mt-1">Supports PDF work instructions, CSV/JSON schedules, or images</p>
+            <button className="mt-5 py-2 px-5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-lg shadow-blue-600/10 transition-colors">
+              Browse Local Files
+            </button>
           </div>
-          <div className="mt-4">
-            <div className="text-2xl font-bold text-white font-mono">{metrics.avgEfficiency}%</div>
-            <div className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
-              <span className="text-emerald-500 font-bold">↑ 1.2%</span> vs last shift
+
+          {errorMsg && (
+            <div className="flex items-center gap-2 p-3 bg-rose-950/30 border border-rose-900/50 text-rose-400 rounded-lg text-xs leading-normal">
+              <AlertCircle size={14} className="shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 2. OCR Scanning Loading View */}
+      {workflowState === 'scanning' && (
+        <div className="max-w-md mx-auto space-y-6 pt-16 text-center">
+          <div className="relative inline-flex items-center justify-center">
+            <div className="h-16 w-16 rounded-full border-4 border-blue-900/30 border-t-blue-500 animate-spin" />
+            <Sparkles size={20} className="absolute text-blue-400 animate-pulse" />
+          </div>
+
+          <div className="space-y-3">
+            <h3 className="text-sm font-bold text-white uppercase tracking-widest font-mono">Running OCR Pipeline</h3>
+            
+            {/* Step animation list */}
+            <div className="space-y-1.5 text-left bg-gray-950/80 border border-gray-850 p-4 rounded-lg font-mono text-[10.5px]">
+              {scanMessages.map((msg, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  {scanStep > idx ? (
+                    <CheckCircle2 size={12} className="text-emerald-500" />
+                  ) : scanStep === idx ? (
+                    <Loader2 size={12} className="text-blue-500 animate-spin" />
+                  ) : (
+                    <div className="h-1.5 w-1.5 rounded-full bg-gray-800 ml-1" />
+                  )}
+                  <span className={scanStep > idx ? 'text-gray-400' : scanStep === idx ? 'text-white font-semibold' : 'text-gray-650'}>
+                    {msg}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
+      )}
 
-        {/* AI Quality Defect Rate */}
-        <div className="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-xs font-semibold text-gray-400 tracking-wide uppercase">AI Defect Rate</span>
-            <span className="p-1.5 rounded-lg bg-emerald-950 text-emerald-400"><CheckCircle size={14} /></span>
-          </div>
-          <div className="mt-4">
-            <div className="text-2xl font-bold text-white font-mono">{metrics.defectRate}%</div>
-            <div className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
-              <span className="text-emerald-500 font-bold">↓ 0.08%</span> reject threshold 1.5%
+      {/* 3. Split-Screen Review & Validation Workspace */}
+      {workflowState === 'review' && extractedData && (
+        <div className="space-y-4">
+          {/* Workspace Controls Header */}
+          <div className="flex items-center justify-between border-b border-gray-800 pb-3">
+            <button
+              onClick={resetWorkspace}
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+            >
+              <ArrowLeft size={14} />
+              Back to Uploader
+            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono text-gray-500">File: {file?.name || 'document.pdf'}</span>
+              <span className="h-2 w-2 rounded-full bg-blue-500" />
             </div>
           </div>
-        </div>
 
-        {/* Active Runs */}
-        <div className="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-xs font-semibold text-gray-400 tracking-wide uppercase">Active Batches</span>
-            <span className="p-1.5 rounded-lg bg-indigo-950 text-indigo-400"><Play size={14} /></span>
-          </div>
-          <div className="mt-4">
-            <div className="text-2xl font-bold text-white font-mono">{metrics.activeRuns}</div>
-            <div className="text-[10px] text-gray-500 mt-1">
-              {metrics.pendingRuns} queued, {metrics.completedRuns} completed
-            </div>
-          </div>
-        </div>
-
-        {/* System Warnings */}
-        <div className="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-xs font-semibold text-gray-400 tracking-wide uppercase">Alarms / Alerts</span>
-            <span className={`p-1.5 rounded-lg ${metrics.alertCount > 0 ? 'bg-rose-950/60 text-rose-400 animate-pulse' : 'bg-gray-950 text-gray-500'}`}><AlertTriangle size={14} /></span>
-          </div>
-          <div className="mt-4">
-            <div className="text-2xl font-bold text-white font-mono">{metrics.alertCount}</div>
-            <div className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
-              {metrics.alertCount > 0 ? (
-                <span className="text-rose-400 font-semibold">Active warning flags</span>
-              ) : (
-                <span className="text-emerald-400 font-semibold">All nodes nominal</span>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Recharts Analytics Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm">
-          <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-blue-500" />
-            Machine Efficiency Overview
-          </h3>
-          <MachineEfficiencyChart machines={machines} />
-        </div>
-
-        <div className="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm">
-          <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            Production Run Rate (Actual vs Target)
-          </h3>
-          <PlantProductionChart orders={orders} />
-        </div>
-      </div>
-
-      {/* Orders and Logs Layout Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Active Production Queue (Columns 1 & 2) */}
-        <div className="lg:col-span-2 bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm flex flex-col">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-sm font-bold text-white">Live Production Queue</h3>
-            <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Database Sync</span>
-          </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-gray-800 text-gray-400">
-                  <th className="pb-3 font-semibold">Batch Name</th>
-                  <th className="pb-3 font-semibold text-center">Status</th>
-                  <th className="pb-3 font-semibold">Units Produced</th>
-                  <th className="pb-3 font-semibold">Progress</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800/60">
-                {orders.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="py-6 text-center text-gray-500">
-                      No production orders available. Import a schedule to start.
-                    </td>
-                  </tr>
-                ) : (
-                  orders.slice(0, 7).map((order) => {
-                    const progress = Math.min((order.quantity / order.targetQuantity) * 100, 100);
-                    return (
-                      <tr key={order.id} className="text-gray-300 hover:bg-gray-800/10 transition-colors">
-                        <td className="py-3.5 font-medium text-white">{order.name}</td>
-                        <td className="py-3.5 text-center">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                            order.status === 'RUNNING' ? 'bg-blue-950 text-blue-400 border border-blue-900/60' :
-                            order.status === 'COMPLETED' ? 'bg-emerald-950 text-emerald-400 border border-emerald-900/60' :
-                            order.status === 'SUSPENDED' ? 'bg-rose-950 text-rose-400 border border-rose-900/60' :
-                            'bg-gray-950 text-gray-400 border border-gray-900'
-                          }`}>
-                            {order.status}
-                          </span>
-                        </td>
-                        <td className="py-3.5 font-mono text-gray-400">
-                          {order.quantity} <span className="text-[10px] text-gray-600">/ {order.targetQuantity}</span>
-                        </td>
-                        <td className="py-3.5">
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-1.5 w-24 bg-gray-850 rounded-full overflow-hidden">
-                              <div 
-                                className={`h-full rounded-full transition-all duration-300 ${
-                                  order.status === 'RUNNING' ? 'bg-blue-500' :
-                                  order.status === 'COMPLETED' ? 'bg-emerald-500' :
-                                  order.status === 'SUSPENDED' ? 'bg-rose-500' :
-                                  'bg-gray-600'
-                                }`}
-                                style={{ width: `${progress}%` }}
-                              />
-                            </div>
-                            <span className="font-mono text-[10px] text-gray-400 w-8 text-right">
-                              {Math.round(progress)}%
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Upload widget & Recent system logs (Column 3) */}
-        <div className="space-y-6">
-          <FileUpload onUploadSuccess={fetchDashboardData} />
-
-          {/* Styled Terminal Log widget */}
-          <div className="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm flex flex-col h-[320px]">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Terminal size={14} className="text-blue-400" />
-                Live Audit Logs
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+            {/* Left Panel: Mock Original Document OCR Bounding-Boxes (2 Columns) */}
+            <div className="lg:col-span-2 bg-gray-950 border border-gray-850 rounded-xl p-5 shadow-sm space-y-4">
+              <h3 className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+                <Eye size={13} className="text-blue-400" />
+                Original Document OCR Preview
               </h3>
-              <div className="flex items-center gap-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
-                <span className="text-[10px] text-gray-500 font-medium font-mono">LIVE</span>
+
+              {/* Rendered Mock Paper Invoice Sheet */}
+              <div className="relative border border-amber-900/30 bg-[#0c101b] rounded-lg p-6 font-mono text-[9px] text-gray-400 leading-normal space-y-6 min-h-[460px] select-none shadow-inner">
+                {/* Visual Bounding Box Highlighting Overlay */}
+                <div className="border-b border-gray-900 pb-4 flex justify-between items-start">
+                  <div>
+                    <span className="text-[10px] font-bold text-white block">WORK ORDER SHEET #509</span>
+                    <span className="text-gray-600">FACTORY LOGISTICS DEPT</span>
+                  </div>
+                  <span className="text-gray-700">PAGE 1/1</span>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Extracted Name OCR box */}
+                  <div className="relative p-2 border border-blue-900/30 bg-blue-950/20 rounded">
+                    <span className="absolute -top-2 left-2 px-1 bg-[#0c101b] text-blue-500 font-sans text-[7px] font-bold">OCR DETECTED: BATCH NAME</span>
+                    <div className="text-[10px] font-semibold text-white tracking-wide">{orderName || 'Auto-Chassis Batch #512'}</div>
+                    <span className="absolute right-2 top-2 text-[8px] font-sans font-bold text-blue-400">{Math.round(meta.confidence.name * 100)}% Match</span>
+                  </div>
+
+                  {/* Extracted Quantity OCR box */}
+                  <div className="relative p-2 border border-emerald-900/30 bg-emerald-950/20 rounded">
+                    <span className="absolute -top-2 left-2 px-1 bg-[#0c101b] text-emerald-500 font-sans text-[7px] font-bold">OCR DETECTED: QUANTITY</span>
+                    <div className="text-[10px] font-semibold text-white tracking-wide font-mono">{targetQuantity} units</div>
+                    <span className="absolute right-2 top-2 text-[8px] font-sans font-bold text-emerald-400">{Math.round(meta.confidence.targetQuantity * 100)}% Match</span>
+                  </div>
+
+                  {/* Extracted Machine and Shift OCR boxes */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="relative p-2 border border-purple-900/30 bg-purple-950/20 rounded">
+                      <span className="absolute -top-2 left-2 px-1 bg-[#0c101b] text-purple-500 font-sans text-[7px] font-bold">OCR DETECTED: MACHINE</span>
+                      <div className="text-[9.5px] font-semibold text-white truncate">{machineName || 'Assembly Line A'}</div>
+                      <span className="absolute right-1 bottom-1 text-[7px] font-sans text-purple-400">{Math.round(meta.confidence.machineName * 100)}%</span>
+                    </div>
+
+                    <div className="relative p-2 border border-indigo-900/30 bg-indigo-950/20 rounded">
+                      <span className="absolute -top-2 left-2 px-1 bg-[#0c101b] text-indigo-500 font-sans text-[7px] font-bold">OCR DETECTED: SHIFT</span>
+                      <div className="text-[9.5px] font-semibold text-white truncate">{shiftName}</div>
+                      <span className="absolute right-1 bottom-1 text-[7px] font-sans text-indigo-400">{Math.round(meta.confidence.shift * 100)}%</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Styled raw text field */}
+                <div className="border-t border-gray-900 pt-4 space-y-1 text-gray-650 text-[8.5px]">
+                  <div>[OCR RAW DATA DUMP]</div>
+                  <div className="line-clamp-6 leading-relaxed font-sans">{meta.originalText}</div>
+                </div>
               </div>
             </div>
-            
-            <div className="flex-1 overflow-y-auto bg-gray-950/70 border border-gray-850 rounded-lg p-3 font-mono text-[10.5px] leading-relaxed space-y-2.5">
-              {logs.length === 0 ? (
-                <div className="text-gray-600 text-center py-10">No system events logged.</div>
-              ) : (
-                logs.map((log) => {
-                  const logTime = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                  return (
-                    <div key={log.id} className="flex gap-2 items-start text-gray-300 border-b border-gray-900/40 pb-1.5">
-                      <span className="text-gray-600 font-semibold shrink-0">{logTime}</span>
-                      <span className={`shrink-0 font-bold ${
-                        log.severity === 'ERROR' ? 'text-rose-500' :
-                        log.severity === 'WARNING' ? 'text-amber-500' : 'text-blue-500'
-                      }`}>
-                        [{log.action}]
+
+            {/* Right Panel: Human Verification Form & Validation (3 Columns) */}
+            <div className="lg:col-span-3 space-y-5">
+              
+              {/* Form panel */}
+              <div className="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm space-y-4">
+                <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <ShieldCheck size={14} className="text-blue-500" />
+                  AI Extraction Review Panel
+                </h3>
+
+                <div className="space-y-3.5">
+                  {/* Order/Batch Name Editable Field */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
+                      <span>Batch/Order Name *</span>
+                      <span className={`font-mono ${meta.confidence.name < 0.85 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                        OCR Confidence: {Math.round(meta.confidence.name * 100)}%
                       </span>
-                      <span className="text-gray-400">{log.details}</span>
                     </div>
-                  );
-                })
-              )}
+                    <input
+                      type="text"
+                      value={orderName}
+                      onChange={(e) => setOrderName(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-gray-950 border border-gray-850 hover:border-gray-800 focus:border-blue-500 text-xs text-white focus:outline-none transition-colors"
+                    />
+                    {/* Confidence Meter */}
+                    <div className="w-full h-1 bg-gray-900 rounded-full overflow-hidden">
+                      <div className={`h-full ${meta.confidence.name < 0.85 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${meta.confidence.name * 100}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Quantity Editable Field */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
+                      <span>Target Quantity *</span>
+                      <span className={`font-mono ${meta.confidence.targetQuantity < 0.80 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                        OCR Confidence: {Math.round(meta.confidence.targetQuantity * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="number"
+                      value={targetQuantity}
+                      onChange={(e) => setTargetQuantity(parseInt(e.target.value, 10) || 0)}
+                      className="w-full px-3 py-2 rounded-lg bg-gray-950 border border-gray-850 hover:border-gray-800 focus:border-blue-500 text-xs text-white focus:outline-none transition-colors"
+                    />
+                    <div className="w-full h-1 bg-gray-900 rounded-full overflow-hidden">
+                      <div className={`h-full ${meta.confidence.targetQuantity < 0.80 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${meta.confidence.targetQuantity * 100}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Machine & Shift Inputs */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
+                        <span>Machine Assignment *</span>
+                        <span className="font-mono text-[9px] text-purple-400">{Math.round(meta.confidence.machineName * 100)}%</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={machineName}
+                        onChange={(e) => setMachineName(e.target.value)}
+                        placeholder="e.g. Welding Robot B"
+                        className="w-full px-3 py-2 rounded-lg bg-gray-950 border border-gray-850 hover:border-gray-800 focus:border-blue-500 text-xs text-white focus:outline-none transition-colors"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
+                        <span>Target Shift *</span>
+                        <span className="font-mono text-[9px] text-indigo-400">{Math.round(meta.confidence.shift * 100)}%</span>
+                      </div>
+                      <select
+                        value={shiftName}
+                        onChange={(e) => setShiftName(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg bg-gray-950 border border-gray-850 hover:border-gray-800 focus:border-blue-500 text-xs text-white focus:outline-none transition-colors"
+                      >
+                        <option value="Morning Shift">Morning Shift</option>
+                        <option value="Afternoon Shift">Afternoon Shift</option>
+                        <option value="Night Shift">Night Shift</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Inspector signature */}
+                  <div className="space-y-1.5 pt-2 border-t border-gray-800/80">
+                    <label className="block text-[10px] uppercase font-semibold text-gray-400">
+                      Inspector Verification Signature *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Type your name to release order"
+                      value={inspectorName}
+                      onChange={(e) => setInspectorName(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-gray-950 border border-blue-900/40 hover:border-blue-800/60 focus:border-blue-500 text-xs text-white focus:outline-none transition-colors"
+                    />
+                  </div>
+
+                  {/* Comments */}
+                  <div className="space-y-1.5">
+                    <label className="block text-[10px] uppercase font-semibold text-gray-400">
+                      QA Release Comments / Notes
+                    </label>
+                    <textarea
+                      placeholder="Write any comments regarding extraction corrections or releases."
+                      value={comments}
+                      onChange={(e) => setComments(e.target.value)}
+                      rows={2}
+                      className="w-full px-3 py-2 rounded-lg bg-gray-950 border border-gray-850 hover:border-gray-800 focus:border-blue-500 text-xs text-white focus:outline-none transition-colors resize-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Validation Warning Panel */}
+              <div className="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm space-y-3">
+                <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <AlertCircle size={14} className="text-amber-500" />
+                    AI Rules Validation Panel
+                  </h4>
+                  <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                    liveErrors.length > 0
+                      ? hasBlockers 
+                        ? 'bg-rose-950 text-rose-400' 
+                        : 'bg-amber-950 text-amber-400'
+                      : 'bg-emerald-950 text-emerald-400'
+                  }`}>
+                    {liveErrors.length > 0 ? `${liveErrors.length} Issue(s) flagged` : 'All rules passed'}
+                  </span>
+                </div>
+
+                <div className="space-y-2.5 max-h-[140px] overflow-y-auto pr-1">
+                  {liveErrors.length === 0 ? (
+                    <div className="text-xs text-emerald-400 flex items-center gap-2">
+                      <CheckCircle2 size={13} />
+                      No blockers or warnings flagged. Ready to commit.
+                    </div>
+                  ) : (
+                    liveErrors.map((err, idx) => {
+                      const isBlocker = err.startsWith('Blocker:');
+                      return (
+                        <div 
+                          key={idx} 
+                          className={`flex items-start gap-2 p-2 rounded-lg text-xs leading-normal ${
+                            isBlocker 
+                              ? 'bg-rose-950/20 border border-rose-900/30 text-rose-400' 
+                              : 'bg-amber-950/20 border border-amber-900/30 text-amber-400'
+                          }`}
+                        >
+                          <AlertCircle size={13} className="shrink-0 mt-0.5" />
+                          <span>{err}</span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Workspace Action Buttons */}
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  onClick={() => handleSubmitReview('REJECTED')}
+                  disabled={submitting}
+                  className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-rose-950/40 border border-rose-900/60 hover:bg-rose-900/50 text-rose-400 disabled:opacity-40 text-xs font-bold active:scale-98 transition-all"
+                >
+                  <XCircle size={15} />
+                  Flag & Reject Document
+                </button>
+                
+                <button
+                  onClick={() => handleSubmitReview('APPROVED')}
+                  disabled={submitting || hasBlockers}
+                  className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/40 disabled:text-gray-400 disabled:border-transparent text-white text-xs font-bold shadow-md shadow-blue-600/10 active:scale-98 transition-all"
+                  title={hasBlockers ? 'Resolve all Blocker errors to release' : 'Save and Release production batch'}
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 size={15} className="animate-spin" />
+                      Committing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={15} />
+                      Verify, Validate & Save
+                    </>
+                  )}
+                </button>
+              </div>
+
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
