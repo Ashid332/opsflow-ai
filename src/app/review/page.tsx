@@ -107,7 +107,7 @@ export default function ReviewQueuePage() {
     } finally {
       setLoading(false);
     }
-  }, [formStates]);
+  }, []);
 
   useEffect(() => {
     fetchInspections();
