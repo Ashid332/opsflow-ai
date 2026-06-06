@@ -59,6 +59,7 @@ export default function DocumentCenter() {
   // UI state
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [previewTab, setPreviewTab] = useState<'document' | 'ocr'>('document');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scanMessages = [
@@ -226,7 +227,14 @@ export default function DocumentCenter() {
   };
 
   // Parsing metadata for rendering confidence values
-  let meta = {
+  let meta: {
+    fileName: string;
+    fileUrl?: string;
+    fileType?: string;
+    confidence: Record<string, number>;
+    validationErrors: string[];
+    originalText: string;
+  } = {
     fileName: 'document.pdf',
     confidence: {
       date: 1.0,
@@ -238,7 +246,7 @@ export default function DocumentCenter() {
       quantityProduced: 1.0,
       timeTaken: 1.0
     },
-    validationErrors: [] as string[],
+    validationErrors: [],
     originalText: ''
   };
 
@@ -269,7 +277,7 @@ export default function DocumentCenter() {
     { name: 'Shift', val: meta.confidence.shift },
     { name: 'Employee Number', val: meta.confidence.employeeNumber },
     { name: 'Operation Code', val: meta.confidence.operationCode },
-    { name: 'Machine Number', val: meta.confidence.machineName },
+    { name: 'Machine Number', val: meta.confidence.machineNumber ?? meta.confidence.machineName },
     { name: 'Work Order Number', val: meta.confidence.workOrderNumber },
     { name: 'Quantity Produced', val: meta.confidence.quantityProduced },
     { name: 'Time Taken', val: meta.confidence.timeTaken },
@@ -397,76 +405,124 @@ export default function DocumentCenter() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-            {/* Left Panel: Mock Original Document OCR Bounding-Boxes (2 Columns) */}
-            <div className="lg:col-span-2 bg-gray-950 border border-gray-850 rounded-xl p-5 shadow-sm space-y-4">
-              <h3 className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-2">
-                <Eye size={13} className="text-blue-400" />
-                Original Document OCR Preview
-              </h3>
-
-              {/* Rendered Mock Paper Invoice Sheet */}
-              <div className="relative border border-amber-900/30 bg-[#0c101b] rounded-lg p-5 font-mono text-[8.5px] text-gray-400 leading-normal space-y-4 min-h-[580px] select-none shadow-inner">
-                <div className="border-b border-gray-900 pb-3 flex justify-between items-start">
-                  <div>
-                    <span className="text-[9.5px] font-bold text-white block">SMART PLANT OPERATIONS RUN LOG</span>
-                    <span className="text-gray-650 text-[7.5px]">AUTOMATED OCR METADATA RECOVERY</span>
+            {/* Left Panel: Original Document OCR Preview (2 Columns) */}
+            <div className="lg:col-span-2 bg-gray-950 border border-gray-850 rounded-xl p-5 shadow-sm space-y-4 flex flex-col min-h-[640px]">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+                  <Eye size={13} className="text-blue-400" />
+                  Original Document OCR Preview
+                </h3>
+                {meta.fileUrl && (
+                  <div className="flex bg-gray-900 border border-gray-800 rounded p-0.5 text-[8.5px]">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTab('document')}
+                      className={`px-2 py-0.5 rounded font-sans font-semibold transition-colors ${
+                        previewTab === 'document'
+                          ? 'bg-blue-600 text-white'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      Document
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTab('ocr')}
+                      className={`px-2 py-0.5 rounded font-sans font-semibold transition-colors ${
+                        previewTab === 'ocr'
+                          ? 'bg-blue-600 text-white'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      OCR Map
+                    </button>
                   </div>
-                  <span className="text-gray-600">PAGE 1/1</span>
-                </div>
-
-                <div className="space-y-3 pt-2">
-                  {/* Bounding box for WO */}
-                  <div className="relative p-1.5 border border-blue-900/30 bg-blue-950/20 rounded">
-                    <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-blue-500 font-sans text-[6px] font-bold">1. WORK ORDER NUMBER</span>
-                    <div className="text-[9px] font-semibold text-white tracking-wide">{workOrderNumber || 'WO-5121'}</div>
-                  </div>
-
-                  {/* Bounding box for Qty & Time */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="relative p-1.5 border border-emerald-900/30 bg-emerald-950/20 rounded">
-                      <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-emerald-500 font-sans text-[6px] font-bold">2. QUANTITY</span>
-                      <div className="text-[9px] font-semibold text-white">{targetQuantity} units</div>
-                    </div>
-                    <div className="relative p-1.5 border border-indigo-900/30 bg-indigo-950/20 rounded">
-                      <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-indigo-500 font-sans text-[6px] font-bold">3. TIME TAKEN</span>
-                      <div className="text-[9px] font-semibold text-white">{timeTaken || '4 hours'}</div>
-                    </div>
-                  </div>
-
-                  {/* Bounding box for Machine & Operator */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="relative p-1.5 border border-purple-900/30 bg-purple-950/20 rounded">
-                      <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-purple-500 font-sans text-[6px] font-bold">4. MACHINE</span>
-                      <div className="text-[9px] font-semibold text-white truncate">{machineName || 'Welding Robot B'}</div>
-                    </div>
-                    <div className="relative p-1.5 border border-pink-900/30 bg-pink-950/20 rounded">
-                      <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-pink-500 font-sans text-[6px] font-bold">5. OPERATOR ID</span>
-                      <div className="text-[9px] font-semibold text-white truncate">{employeeNumber || 'EMP-712'}</div>
-                    </div>
-                  </div>
-
-                  {/* Bounding box for Date, Shift, OpCode */}
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="relative p-1.5 border border-amber-900/30 bg-amber-950/20 rounded">
-                      <span className="absolute -top-1.5 left-1 px-0.5 bg-[#0c101b] text-amber-500 font-sans text-[6.5px] font-bold">6. DATE</span>
-                      <div className="text-[8.5px] font-semibold text-white truncate">{date}</div>
-                    </div>
-                    <div className="relative p-1.5 border border-teal-900/30 bg-teal-950/20 rounded">
-                      <span className="absolute -top-1.5 left-1 px-0.5 bg-[#0c101b] text-teal-500 font-sans text-[6.5px] font-bold">7. SHIFT</span>
-                      <div className="text-[8.5px] font-semibold text-white truncate">{shiftName}</div>
-                    </div>
-                    <div className="relative p-1.5 border border-gray-900 bg-gray-950/20 rounded">
-                      <span className="absolute -top-1.5 left-1 px-0.5 bg-[#0c101b] text-gray-400 font-sans text-[6.5px] font-bold">8. OP CODE</span>
-                      <div className="text-[8.5px] font-semibold text-white truncate">{operationCode}</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="border-t border-gray-900 pt-4 space-y-1 text-gray-650 text-[8px]">
-                  <div>[RAW GEMINI TEXT DE-SERIALIZATION]</div>
-                  <div className="line-clamp-10 leading-relaxed font-sans">{meta.originalText}</div>
-                </div>
+                )}
               </div>
+
+              {meta.fileUrl && previewTab === 'document' ? (
+                <div className="flex-1 flex flex-col justify-center items-center bg-[#0c101b] border border-amber-900/10 rounded-lg p-2 overflow-hidden shadow-inner min-h-[500px]">
+                  {meta.fileType?.includes('pdf') ? (
+                    <iframe 
+                      src={meta.fileUrl} 
+                      className="w-full h-full min-h-[500px] border-none rounded bg-[#0c101b]"
+                      title="Uploaded PDF Document"
+                    />
+                  ) : (
+                    <img 
+                      src={meta.fileUrl} 
+                      alt="Uploaded Scanned Document" 
+                      className="max-w-full max-h-[500px] object-contain rounded"
+                    />
+                  )}
+                </div>
+              ) : (
+                /* Rendered Mock Paper Invoice Sheet */
+                <div className="relative border border-amber-900/30 bg-[#0c101b] rounded-lg p-5 font-mono text-[8.5px] text-gray-450 leading-normal space-y-4 min-h-[500px] select-none shadow-inner flex-1 flex flex-col justify-between">
+                  <div>
+                    <div className="border-b border-gray-900 pb-3 flex justify-between items-start mb-3">
+                      <div>
+                        <span className="text-[9.5px] font-bold text-white block">SMART PLANT OPERATIONS RUN LOG</span>
+                        <span className="text-gray-655 text-[7.5px]">AUTOMATED OCR METADATA RECOVERY</span>
+                      </div>
+                      <span className="text-gray-600">PAGE 1/1</span>
+                    </div>
+
+                    <div className="space-y-3 pt-2">
+                      {/* Bounding box for WO */}
+                      <div className="relative p-1.5 border border-blue-900/30 bg-blue-950/20 rounded">
+                        <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-blue-500 font-sans text-[6px] font-bold">1. WORK ORDER NUMBER</span>
+                        <div className="text-[9px] font-semibold text-white tracking-wide">{workOrderNumber || 'WO-5121'}</div>
+                      </div>
+
+                      {/* Bounding box for Qty & Time */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="relative p-1.5 border border-emerald-900/30 bg-emerald-950/20 rounded">
+                          <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-emerald-500 font-sans text-[6px] font-bold">2. QUANTITY</span>
+                          <div className="text-[9px] font-semibold text-white">{targetQuantity} units</div>
+                        </div>
+                        <div className="relative p-1.5 border border-indigo-900/30 bg-indigo-950/20 rounded">
+                          <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-indigo-500 font-sans text-[6px] font-bold">3. TIME TAKEN</span>
+                          <div className="text-[9px] font-semibold text-white">{timeTaken || '4 hours'}</div>
+                        </div>
+                      </div>
+
+                      {/* Bounding box for Machine & Operator */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="relative p-1.5 border border-purple-900/30 bg-purple-950/20 rounded">
+                          <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-purple-500 font-sans text-[6px] font-bold">4. MACHINE</span>
+                          <div className="text-[9px] font-semibold text-white truncate">{machineName || 'Welding Robot B'}</div>
+                        </div>
+                        <div className="relative p-1.5 border border-pink-900/30 bg-pink-950/20 rounded">
+                          <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-pink-500 font-sans text-[6px] font-bold">5. OPERATOR ID</span>
+                          <div className="text-[9px] font-semibold text-white truncate">{employeeNumber || 'EMP-712'}</div>
+                        </div>
+                      </div>
+
+                      {/* Bounding box for Date, Shift, OpCode */}
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="relative p-1.5 border border-amber-900/30 bg-amber-950/20 rounded">
+                          <span className="absolute -top-1.5 left-1 px-0.5 bg-[#0c101b] text-amber-500 font-sans text-[6.5px] font-bold">6. DATE</span>
+                          <div className="text-[8.5px] font-semibold text-white truncate">{date}</div>
+                        </div>
+                        <div className="relative p-1.5 border border-teal-900/30 bg-teal-950/20 rounded">
+                          <span className="absolute -top-1.5 left-1 px-0.5 bg-[#0c101b] text-teal-500 font-sans text-[6.5px] font-bold">7. SHIFT</span>
+                          <div className="text-[8.5px] font-semibold text-white truncate">{shiftName}</div>
+                        </div>
+                        <div className="relative p-1.5 border border-gray-900 bg-gray-950/20 rounded">
+                          <span className="absolute -top-1.5 left-1 px-0.5 bg-[#0c101b] text-gray-400 font-sans text-[6.5px] font-bold">8. OP CODE</span>
+                          <div className="text-[8.5px] font-semibold text-white truncate">{operationCode}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-gray-900 pt-4 space-y-1 text-gray-655 text-[8px] mt-4">
+                    <div>[RAW GEMINI TEXT DE-SERIALIZATION]</div>
+                    <div className="line-clamp-10 leading-relaxed font-sans">{meta.originalText}</div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right Panel: Human Verification Form & Validation (3 Columns) */}
@@ -563,8 +619,8 @@ export default function DocumentCenter() {
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
                       <span className="flex items-center gap-1"><Cpu size={11} />Machine Target</span>
-                      <span className={`font-mono text-[9px] ${getConfidenceTextClass(meta.confidence.machineName)}`}>
-                        {Math.round(meta.confidence.machineName * 100)}%
+                      <span className={`font-mono text-[9px] ${getConfidenceTextClass(meta.confidence.machineNumber ?? meta.confidence.machineName ?? 1.0)}`}>
+                        {Math.round((meta.confidence.machineNumber ?? meta.confidence.machineName ?? 1.0) * 100)}%
                       </span>
                     </div>
                     <input
@@ -574,7 +630,7 @@ export default function DocumentCenter() {
                       className="w-full px-2.5 py-1.5 rounded bg-gray-950 border border-gray-850 hover:border-gray-800 text-xs text-white focus:outline-none"
                     />
                     <div className="w-full h-1 bg-gray-900 rounded-full overflow-hidden">
-                      <div className={`h-full ${getConfidenceColor(meta.confidence.machineName)}`} style={{ width: `${meta.confidence.machineName * 100}%` }} />
+                      <div className={`h-full ${getConfidenceColor(meta.confidence.machineNumber ?? meta.confidence.machineName ?? 1.0)}`} style={{ width: `${(meta.confidence.machineNumber ?? meta.confidence.machineName ?? 1.0) * 100}%` }} />
                     </div>
                   </div>
 

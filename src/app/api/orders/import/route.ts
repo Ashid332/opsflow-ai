@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { extractFieldsFromDocument } from '@/lib/gemini';
+import { promises as fs } from 'fs';
+import path from 'path';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,6 +19,15 @@ export async function POST(request: NextRequest) {
     // Read raw buffer from file
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
+
+    // Save file locally to public/uploads
+    const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+    await fs.mkdir(uploadsDir, { recursive: true });
+    const fileExtension = fileName.split('.').pop() || 'pdf';
+    const uniqueFileName = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}.${fileExtension}`;
+    const filePath = path.join(uploadsDir, uniqueFileName);
+    await fs.writeFile(filePath, buffer);
+    const fileUrl = `/uploads/${uniqueFileName}`;
 
     // Call Gemini Vision OCR helper
     const ocrResult = await extractFieldsFromDocument(buffer, mimeType);
@@ -72,6 +83,8 @@ export async function POST(request: NextRequest) {
 
     const extractionMetadata = {
       fileName,
+      fileUrl,
+      fileType: mimeType,
       date: ocrResult.date,
       shift: ocrResult.shift,
       employeeNumber: ocrResult.employeeNumber,

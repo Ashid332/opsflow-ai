@@ -41,12 +41,12 @@ export default function Header() {
           <span>{time || 'Loading...'}</span>
         </div>
 
-        {/* Global OEE */}
+        {/* Global OCR Accuracy */}
         <div className="hidden sm:flex items-center gap-2.5">
           <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
           <div className="text-right">
-            <div className="text-xs font-semibold text-white">88.5% OEE</div>
-            <div className="text-[10px] text-gray-400">Plant Performance</div>
+            <div className="text-xs font-semibold text-white">94.2% Avg OCR</div>
+            <div className="text-[10px] text-gray-400">Extraction Accuracy</div>
           </div>
         </div>
 

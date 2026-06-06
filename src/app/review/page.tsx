@@ -13,7 +13,8 @@ import {
   Activity,
   Cpu,
   Hash,
-  Hammer
+  Hammer,
+  Eye
 } from 'lucide-react';
 
 interface ProductOrder {
@@ -40,6 +41,8 @@ export default function ReviewQueuePage() {
   const [inspections, setInspections] = useState<QualityInspection[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'pending' | 'completed'>('pending');
+  const [expandedPreviewId, setExpandedPreviewId] = useState<string | null>(null);
+  const [previewTabs, setPreviewTabs] = useState<Record<string, 'document' | 'ocr'>>({});
 
   // Form states mapped by inspection ID
   const [formStates, setFormStates] = useState<Record<string, {
@@ -236,6 +239,14 @@ export default function ReviewQueuePage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {pendingItems.map((ins) => {
+                const isPreviewExpanded = expandedPreviewId === ins.id;
+
+                const getConfidenceColor = (score: number) => {
+                  if (score >= 0.85) return 'bg-emerald-500';
+                  if (score >= 0.70) return 'bg-amber-500';
+                  return 'bg-rose-500';
+                };
+
                 const state = formStates[ins.id] || {
                   inspectorName: '',
                   date: '',
@@ -244,24 +255,39 @@ export default function ReviewQueuePage() {
                   operationCode: '',
                   machineName: '',
                   workOrderNumber: '',
-                  targetQuantity: 0,
+                  targetQuantity: ins.order.targetQuantity,
                   timeTaken: '',
                   comments: '',
                 };
 
-                let meta = {
-                  fileName: 'file.pdf',
-                  confidence: {
-                    date: 1.0,
-                    shift: 1.0,
-                    employeeNumber: 1.0,
-                    operationCode: 1.0,
-                    machineName: 1.0,
-                    workOrderNumber: 1.0,
-                    quantityProduced: 1.0,
-                    timeTaken: 1.0
-                  },
-                  validationErrors: [] as string[]
+                let meta: {
+                  fileName: string;
+                  fileUrl?: string;
+                  fileType?: string;
+                  date: string;
+                  shift: string;
+                  employeeNumber: string;
+                  operationCode: string;
+                  machineName: string;
+                  workOrderNumber: string;
+                  quantityProduced: number;
+                  timeTaken: string;
+                  confidence: Record<string, number>;
+                  originalText: string;
+                  validationErrors: string[];
+                } = {
+                  fileName: 'document.pdf',
+                  date: '',
+                  shift: 'Morning Shift',
+                  employeeNumber: '',
+                  operationCode: '',
+                  machineName: '',
+                  workOrderNumber: '',
+                  quantityProduced: ins.order.targetQuantity,
+                  timeTaken: '',
+                  confidence: {},
+                  originalText: '',
+                  validationErrors: [],
                 };
 
                 if (ins.notes) {
@@ -270,205 +296,395 @@ export default function ReviewQueuePage() {
                   } catch (e) {}
                 }
 
-                // Live client validation indicators
+                // Live client-side re-validation
                 const liveErrors: string[] = [];
                 if (state.targetQuantity > 1000) {
-                  liveErrors.push(`Blocker: Quantity (${state.targetQuantity}) exceeds standard limit of 1000.`);
+                  liveErrors.push(`Blocker: Extracted quantity (${state.targetQuantity}) exceeds standard machine capacity of 1000 units.`);
                 }
                 if (!state.machineName.trim()) {
-                  liveErrors.push(`Blocker: Empty machine assignment field.`);
+                  liveErrors.push(`Blocker: Machine assignment field is empty.`);
                 }
                 if (!state.employeeNumber.trim()) {
-                  liveErrors.push(`Warning: Empty Employee Number.`);
+                  liveErrors.push(`Warning: Missing Employee Number.`);
                 }
+                if (!state.workOrderNumber.trim()) {
+                  liveErrors.push(`Warning: Work Order Number is empty.`);
+                }
+
+                const confidenceMap = meta.confidence || {};
+                const confidenceItems = [
+                  { name: 'Date', val: confidenceMap.date },
+                  { name: 'Shift', val: confidenceMap.shift },
+                  { name: 'Employee Number', val: confidenceMap.employeeNumber },
+                  { name: 'Operation Code', val: confidenceMap.operationCode },
+                  { name: 'Machine Number', val: confidenceMap.machineNumber ?? confidenceMap.machineName },
+                  { name: 'Work Order Number', val: confidenceMap.workOrderNumber },
+                  { name: 'Quantity Produced', val: confidenceMap.quantityProduced },
+                  { name: 'Time Taken', val: confidenceMap.timeTaken },
+                ];
+
+                confidenceItems.forEach(item => {
+                  if (item.val !== undefined && item.val < 0.75) {
+                    liveErrors.push(`Warning: Low OCR reading confidence (${Math.round(item.val * 100)}%) on '${item.name}'.`);
+                  }
+                });
 
                 const hasBlockers = liveErrors.some(e => e.startsWith('Blocker:'));
                 const isSubmitting = submittingId === ins.id;
 
                 return (
-                  <div key={ins.id} className="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm space-y-4">
+                  <div 
+                    key={ins.id} 
+                    className={`bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm space-y-4 transition-all duration-300 ${
+                      isPreviewExpanded ? 'col-span-1 md:col-span-2' : ''
+                    }`}
+                  >
                     {/* Header */}
                     <div className="flex justify-between items-start border-b border-gray-800 pb-3">
                       <div>
                         <h4 className="font-bold text-sm text-white">{state.workOrderNumber || ins.order.name}</h4>
                         <span className="text-[9px] font-mono text-gray-500">File: {meta.fileName}</span>
                       </div>
-                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
-                        ins.order.status === 'SUSPENDED' 
-                          ? 'bg-rose-950 text-rose-400 border border-rose-900/60' 
-                          : 'bg-amber-950 text-amber-400 border border-amber-900/60 animate-pulse'
-                      }`}>
-                        {ins.order.status === 'SUSPENDED' ? 'BLOCKED' : 'PENDING REVIEW'}
-                      </span>
-                    </div>
-
-                    {/* 8 OCR Input Form fields grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                      
-                      {/* Date */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
-                          <Calendar size={11} /> Date
-                        </label>
-                        <input
-                          type="text"
-                          value={state.date}
-                          onChange={(e) => handleFormChange(ins.id, 'date', e.target.value)}
-                          className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
-                        />
-                      </div>
-
-                      {/* Shift */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
-                          <Clock size={11} /> Shift
-                        </label>
-                        <select
-                          value={state.shiftName}
-                          onChange={(e) => handleFormChange(ins.id, 'shiftName', e.target.value)}
-                          className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setExpandedPreviewId(isPreviewExpanded ? null : ins.id)}
+                          className="flex items-center gap-1.5 py-1 px-2.5 rounded bg-gray-950 border border-gray-850 text-[10px] text-gray-400 hover:text-white hover:border-gray-750 transition-colors"
                         >
-                          <option value="Morning Shift">Morning Shift</option>
-                          <option value="Afternoon Shift">Afternoon Shift</option>
-                          <option value="Night Shift">Night Shift</option>
-                        </select>
-                      </div>
-
-                      {/* Employee Number */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
-                          <User size={11} /> Operator No
-                        </label>
-                        <input
-                          type="text"
-                          value={state.employeeNumber}
-                          onChange={(e) => handleFormChange(ins.id, 'employeeNumber', e.target.value)}
-                          className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
-                        />
-                      </div>
-
-                      {/* Operation Code */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
-                          <Activity size={11} /> Op Code
-                        </label>
-                        <input
-                          type="text"
-                          value={state.operationCode}
-                          onChange={(e) => handleFormChange(ins.id, 'operationCode', e.target.value)}
-                          className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
-                        />
-                      </div>
-
-                      {/* Machine */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
-                          <Cpu size={11} /> Machine
-                        </label>
-                        <input
-                          type="text"
-                          value={state.machineName}
-                          onChange={(e) => handleFormChange(ins.id, 'machineName', e.target.value)}
-                          className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
-                        />
-                      </div>
-
-                      {/* Work Order */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
-                          <Hash size={11} /> Work Order No
-                        </label>
-                        <input
-                          type="text"
-                          value={state.workOrderNumber}
-                          onChange={(e) => handleFormChange(ins.id, 'workOrderNumber', e.target.value)}
-                          className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
-                        />
-                      </div>
-
-                      {/* Quantity */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
-                          <Hammer size={11} /> Qty Produced
-                        </label>
-                        <input
-                          type="number"
-                          value={state.targetQuantity}
-                          onChange={(e) => handleFormChange(ins.id, 'targetQuantity', parseInt(e.target.value, 10) || 0)}
-                          className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
-                        />
-                      </div>
-
-                      {/* Time Taken */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
-                          <Clock size={11} /> Time Taken
-                        </label>
-                        <input
-                          type="text"
-                          value={state.timeTaken}
-                          onChange={(e) => handleFormChange(ins.id, 'timeTaken', e.target.value)}
-                          className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
-                        />
-                      </div>
-
-                    </div>
-
-                    {/* Signature and Comments */}
-                    <div className="space-y-2 border-t border-gray-850/60 pt-3">
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-gray-400 uppercase">Supervisor Signature *</label>
-                        <input
-                          type="text"
-                          placeholder="Your verification name"
-                          value={state.inspectorName}
-                          onChange={(e) => handleFormChange(ins.id, 'inspectorName', e.target.value)}
-                          className="w-full px-2.5 py-1 rounded bg-gray-950 border border-blue-900/40 text-xs text-white focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-semibold text-gray-400 uppercase">Supervisor Release Notes</label>
-                        <textarea
-                          placeholder="Review comments"
-                          value={state.comments}
-                          onChange={(e) => handleFormChange(ins.id, 'comments', e.target.value)}
-                          rows={1}
-                          className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none resize-none"
-                        />
+                          <Eye size={12} />
+                          {isPreviewExpanded ? 'Hide OCR' : 'Preview OCR'}
+                        </button>
+                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                          ins.order.status === 'SUSPENDED' 
+                            ? 'bg-rose-950 text-rose-400 border border-rose-900/60' 
+                            : 'bg-amber-950 text-amber-400 border border-amber-900/60 animate-pulse'
+                        }`}>
+                          {ins.order.status === 'SUSPENDED' ? 'BLOCKED' : 'PENDING REVIEW'}
+                        </span>
                       </div>
                     </div>
 
-                    {/* Rule validations block */}
-                    {liveErrors.length > 0 && (
-                      <div className="p-2.5 rounded bg-rose-955/20 border border-rose-900/30 text-rose-455 text-[10px] text-rose-400 space-y-1">
-                        {liveErrors.map((err, i) => (
-                          <div key={i} className="flex gap-1 items-start">
-                            <AlertCircle size={10} className="shrink-0 mt-0.5" />
-                            <span>{err}</span>
+                    {/* Split-Screen workspace container if expanded */}
+                    <div className={isPreviewExpanded ? 'grid grid-cols-1 lg:grid-cols-5 gap-6' : 'space-y-4'}>
+                      
+                      {/* Collapsible Left Panel: OCR Document Bounding Box Preview */}
+                      {isPreviewExpanded && (
+                        <div className="lg:col-span-2 bg-gray-950 border border-gray-850 rounded-xl p-4 font-mono text-[8px] text-gray-450 leading-normal space-y-3 min-h-[460px] flex flex-col select-none">
+                          <div className="border-b border-gray-900 pb-2 flex justify-between items-center">
+                            <div>
+                              <span className="text-[9px] font-bold text-white block">ORIGINAL RUN SHEET</span>
+                              <span className="text-[7px] text-gray-500">FACTORY RUN LOG FILE</span>
+                            </div>
+                            {meta.fileUrl && (
+                              <div className="flex bg-gray-900 border border-gray-800 rounded p-0.5 text-[8.5px]">
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewTabs(prev => ({ ...prev, [ins.id]: 'document' }))}
+                                  className={`px-2 py-0.5 rounded font-sans font-semibold transition-colors ${
+                                    (previewTabs[ins.id] || 'document') === 'document'
+                                      ? 'bg-blue-600 text-white'
+                                      : 'text-gray-400 hover:text-white'
+                                  }`}
+                                >
+                                  Document
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewTabs(prev => ({ ...prev, [ins.id]: 'ocr' }))}
+                                  className={`px-2 py-0.5 rounded font-sans font-semibold transition-colors ${
+                                    previewTabs[ins.id] === 'ocr'
+                                      ? 'bg-blue-600 text-white'
+                                      : 'text-gray-400 hover:text-white'
+                                  }`}
+                                >
+                                  OCR Map
+                                </button>
+                              </div>
+                            )}
                           </div>
-                        ))}
-                      </div>
-                    )}
 
-                    {/* Actions */}
-                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-850/40">
-                      <button
-                        onClick={() => submitReview(ins.id, 'REJECTED')}
-                        disabled={isSubmitting}
-                        className="flex items-center justify-center gap-1.5 py-1.5 px-3 rounded bg-rose-950/40 border border-rose-900/60 hover:bg-rose-900/50 text-rose-400 disabled:opacity-40 text-xs font-bold"
-                      >
-                        <XCircle size={12} />
-                        Halt & Reject
-                      </button>
-                      <button
-                        onClick={() => submitReview(ins.id, 'APPROVED')}
-                        disabled={isSubmitting || hasBlockers}
-                        className="flex items-center justify-center gap-1.5 py-1.5 px-3 rounded bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/40 disabled:text-gray-400 text-white text-xs font-bold shadow shadow-blue-600/10"
-                      >
-                        <CheckCircle2 size={12} />
-                        Validate & Release
-                      </button>
+                          {meta.fileUrl && (previewTabs[ins.id] || 'document') === 'document' ? (
+                            <div className="flex-1 flex flex-col justify-center items-center bg-[#0c101b] rounded-lg p-2 overflow-hidden min-h-[380px]">
+                              {meta.fileType?.includes('pdf') ? (
+                                <iframe 
+                                  src={meta.fileUrl} 
+                                  className="w-full h-full min-h-[380px] border-none rounded bg-[#0c101b]"
+                                  title="Uploaded PDF Document"
+                                />
+                              ) : (
+                                <img 
+                                  src={meta.fileUrl} 
+                                  alt="Scanned Document Preview" 
+                                  className="max-w-full max-h-[400px] object-contain rounded"
+                                />
+                              )}
+                            </div>
+                          ) : (
+                            <>
+                              <div className="space-y-2 pt-1 flex-1 overflow-y-auto">
+                                {/* WO# */}
+                                <div className="relative p-1 border border-blue-900/20 bg-blue-950/10 rounded">
+                                  <span className="absolute -top-1 left-1.5 px-0.5 bg-gray-950 text-blue-500 font-sans text-[5px] font-bold">1. WORK ORDER</span>
+                                  <div className="text-[8.5px] font-semibold text-white truncate">{state.workOrderNumber}</div>
+                                </div>
+
+                                {/* Qty & Time */}
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="relative p-1 border border-emerald-900/20 bg-emerald-950/10 rounded">
+                                    <span className="absolute -top-1 left-1.5 px-0.5 bg-gray-950 text-emerald-500 font-sans text-[5px] font-bold">2. YIELD QTY</span>
+                                    <div className="text-[8.5px] font-semibold text-white">{state.targetQuantity} units</div>
+                                  </div>
+                                  <div className="relative p-1 border border-indigo-900/20 bg-indigo-950/10 rounded">
+                                    <span className="absolute -top-1 left-1.5 px-0.5 bg-gray-950 text-indigo-500 font-sans text-[5px] font-bold">3. DURATION</span>
+                                    <div className="text-[8.5px] font-semibold text-white truncate">{state.timeTaken}</div>
+                                  </div>
+                                </div>
+
+                                {/* Machine & Operator */}
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="relative p-1 border border-purple-900/20 bg-purple-950/10 rounded">
+                                    <span className="absolute -top-1 left-1.5 px-0.5 bg-gray-950 text-purple-500 font-sans text-[5px] font-bold">4. MACHINE</span>
+                                    <div className="text-[8.5px] font-semibold text-white truncate">{state.machineName}</div>
+                                  </div>
+                                  <div className="relative p-1 border border-pink-900/20 bg-pink-950/10 rounded">
+                                    <span className="absolute -top-1 left-1.5 px-0.5 bg-gray-950 text-pink-500 font-sans text-[5px] font-bold">5. EMP ID</span>
+                                    <div className="text-[8.5px] font-semibold text-white truncate">{state.employeeNumber}</div>
+                                  </div>
+                                </div>
+
+                                {/* Date & Shift */}
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="relative p-1 border border-amber-900/20 bg-amber-950/10 rounded">
+                                    <span className="absolute -top-1 left-1 px-0.5 bg-gray-950 text-amber-500 font-sans text-[5px] font-bold">6. DATE</span>
+                                    <div className="text-[8px] font-semibold text-white truncate">{state.date}</div>
+                                  </div>
+                                  <div className="relative p-1 border border-teal-900/20 bg-teal-950/10 rounded">
+                                    <span className="absolute -top-1 left-1 px-0.5 bg-gray-950 text-teal-500 font-sans text-[5px] font-bold">7. SHIFT</span>
+                                    <div className="text-[8px] font-semibold text-white truncate">{state.shiftName}</div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="border-t border-gray-900 pt-2.5 space-y-1 text-gray-655 text-[7.5px]">
+                                <div>[RAW UNSTRUCTURED OCR TEXT]</div>
+                                <div className="line-clamp-6 leading-relaxed font-sans">{meta.originalText}</div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Right Panel: Verification Form Inputs */}
+                      <div className={`space-y-4 ${isPreviewExpanded ? 'lg:col-span-3' : ''}`}>
+                        {/* 8 OCR Input Form fields grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                          
+                          {/* Date */}
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
+                              <Calendar size={11} /> Date
+                            </label>
+                            <input
+                              type="text"
+                              value={state.date}
+                              onChange={(e) => handleFormChange(ins.id, 'date', e.target.value)}
+                              className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
+                            />
+                            {isPreviewExpanded && meta.confidence.date !== undefined && (
+                              <div className="w-full h-0.5 bg-gray-900 rounded-full overflow-hidden mt-1">
+                                <div className={`h-full ${getConfidenceColor(meta.confidence.date)}`} style={{ width: `${meta.confidence.date * 100}%` }} />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Shift */}
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
+                              <Clock size={11} /> Shift
+                            </label>
+                            <select
+                              value={state.shiftName}
+                              onChange={(e) => handleFormChange(ins.id, 'shiftName', e.target.value)}
+                              className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
+                            >
+                              <option value="Morning Shift">Morning Shift</option>
+                              <option value="Afternoon Shift">Afternoon Shift</option>
+                              <option value="Night Shift">Night Shift</option>
+                            </select>
+                            {isPreviewExpanded && meta.confidence.shift !== undefined && (
+                              <div className="w-full h-0.5 bg-gray-900 rounded-full overflow-hidden mt-1">
+                                <div className={`h-full ${getConfidenceColor(meta.confidence.shift)}`} style={{ width: `${meta.confidence.shift * 100}%` }} />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Employee Number */}
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
+                              <User size={11} /> Operator No
+                            </label>
+                            <input
+                              type="text"
+                              value={state.employeeNumber}
+                              onChange={(e) => handleFormChange(ins.id, 'employeeNumber', e.target.value)}
+                              className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
+                            />
+                            {isPreviewExpanded && meta.confidence.employeeNumber !== undefined && (
+                              <div className="w-full h-0.5 bg-gray-900 rounded-full overflow-hidden mt-1">
+                                <div className={`h-full ${getConfidenceColor(meta.confidence.employeeNumber)}`} style={{ width: `${meta.confidence.employeeNumber * 100}%` }} />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Operation Code */}
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
+                              <Activity size={11} /> Op Code
+                            </label>
+                            <input
+                              type="text"
+                              value={state.operationCode}
+                              onChange={(e) => handleFormChange(ins.id, 'operationCode', e.target.value)}
+                              className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
+                            />
+                            {isPreviewExpanded && meta.confidence.operationCode !== undefined && (
+                              <div className="w-full h-0.5 bg-gray-900 rounded-full overflow-hidden mt-1">
+                                <div className={`h-full ${getConfidenceColor(meta.confidence.operationCode)}`} style={{ width: `${meta.confidence.operationCode * 100}%` }} />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Machine */}
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
+                              <Cpu size={11} /> Machine
+                            </label>
+                            <input
+                              type="text"
+                              value={state.machineName}
+                              onChange={(e) => handleFormChange(ins.id, 'machineName', e.target.value)}
+                              className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
+                            />
+                            {isPreviewExpanded && (meta.confidence.machineNumber !== undefined || meta.confidence.machineName !== undefined) && (
+                              <div className="w-full h-0.5 bg-gray-900 rounded-full overflow-hidden mt-1">
+                                <div className={`h-full ${getConfidenceColor(meta.confidence.machineNumber ?? meta.confidence.machineName)}`} style={{ width: `${(meta.confidence.machineNumber ?? meta.confidence.machineName) * 100}%` }} />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Work Order */}
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
+                              <Hash size={11} /> Work Order No
+                            </label>
+                            <input
+                              type="text"
+                              value={state.workOrderNumber}
+                              onChange={(e) => handleFormChange(ins.id, 'workOrderNumber', e.target.value)}
+                              className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
+                            />
+                            {isPreviewExpanded && meta.confidence.workOrderNumber !== undefined && (
+                              <div className="w-full h-0.5 bg-gray-900 rounded-full overflow-hidden mt-1">
+                                <div className={`h-full ${getConfidenceColor(meta.confidence.workOrderNumber)}`} style={{ width: `${meta.confidence.workOrderNumber * 100}%` }} />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Quantity */}
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
+                              <Hammer size={11} /> Qty Produced
+                            </label>
+                            <input
+                              type="number"
+                              value={state.targetQuantity}
+                              onChange={(e) => handleFormChange(ins.id, 'targetQuantity', parseInt(e.target.value, 10) || 0)}
+                              className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
+                            />
+                            {isPreviewExpanded && meta.confidence.quantityProduced !== undefined && (
+                              <div className="w-full h-0.5 bg-gray-900 rounded-full overflow-hidden mt-1">
+                                <div className={`h-full ${getConfidenceColor(meta.confidence.quantityProduced)}`} style={{ width: `${meta.confidence.quantityProduced * 100}%` }} />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Time Taken */}
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-semibold text-gray-400 uppercase flex items-center gap-1">
+                              <Clock size={11} /> Time Taken
+                            </label>
+                            <input
+                              type="text"
+                              value={state.timeTaken}
+                              onChange={(e) => handleFormChange(ins.id, 'timeTaken', e.target.value)}
+                              className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
+                            />
+                            {isPreviewExpanded && meta.confidence.timeTaken !== undefined && (
+                              <div className="w-full h-0.5 bg-gray-900 rounded-full overflow-hidden mt-1">
+                                <div className={`h-full ${getConfidenceColor(meta.confidence.timeTaken)}`} style={{ width: `${meta.confidence.timeTaken * 100}%` }} />
+                              </div>
+                            )}
+                          </div>
+
+                        </div>
+
+                        {/* Signature and Comments */}
+                        <div className="space-y-2 border-t border-gray-850/60 pt-3">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-semibold text-gray-400 uppercase">Supervisor Signature *</label>
+                            <input
+                              type="text"
+                              placeholder="Your verification name"
+                              value={state.inspectorName}
+                              onChange={(e) => handleFormChange(ins.id, 'inspectorName', e.target.value)}
+                              className="w-full px-2.5 py-1 rounded bg-gray-950 border border-blue-900/40 text-xs text-white focus:outline-none"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-semibold text-gray-400 uppercase">Supervisor Release Notes</label>
+                            <textarea
+                              placeholder="Review comments"
+                              value={state.comments}
+                              onChange={(e) => handleFormChange(ins.id, 'comments', e.target.value)}
+                              rows={1}
+                              className="w-full px-2.5 py-1 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none resize-none"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Rule validations block */}
+                        {liveErrors.length > 0 && (
+                          <div className="p-2.5 rounded bg-rose-955/20 border border-rose-900/30 text-rose-455 text-[10px] text-rose-400 space-y-1">
+                            {liveErrors.map((err, i) => (
+                              <div key={i} className="flex gap-1 items-start">
+                                <AlertCircle size={10} className="shrink-0 mt-0.5" />
+                                <span>{err}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Actions */}
+                        <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-850/40">
+                          <button
+                            onClick={() => submitReview(ins.id, 'REJECTED')}
+                            disabled={isSubmitting}
+                            className="flex items-center justify-center gap-1.5 py-1.5 px-3 rounded bg-rose-950/40 border border-rose-900/60 hover:bg-rose-900/50 text-rose-400 disabled:opacity-40 text-xs font-bold"
+                          >
+                            <XCircle size={12} />
+                            Halt & Reject
+                          </button>
+                          <button
+                            onClick={() => submitReview(ins.id, 'APPROVED')}
+                            disabled={isSubmitting || hasBlockers}
+                            className="flex items-center justify-center gap-1.5 py-1.5 px-3 rounded bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/40 disabled:text-gray-400 text-white text-xs font-bold shadow shadow-blue-600/10"
+                          >
+                            <CheckCircle2 size={12} />
+                            Validate & Release
+                          </button>
+                        </div>
+                      </div>
+
                     </div>
                   </div>
                 );
