@@ -1,13 +1,21 @@
 import { PrismaClient } from '@prisma/client';
-import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
+import { PrismaNeon } from '@prisma/adapter-neon';
+import { Pool, neonConfig } from '@neondatabase/serverless';
+import ws from 'ws';
+
+// Set WebSocket constructor for local Node.js environment
+if (typeof globalThis.WebSocket === 'undefined' && typeof window === 'undefined') {
+  neonConfig.webSocketConstructor = ws;
+}
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
 const getPrismaClient = () => {
-  const url = process.env.DATABASE_URL || 'file:./dev.db';
-  const adapter = new PrismaBetterSqlite3({ url });
+  const connectionString = process.env.DATABASE_URL || 'postgresql://placeholder-host:5432/placeholder-db';
+  const pool = new Pool({ connectionString });
+  const adapter = new PrismaNeon(pool as any);
   return new PrismaClient({ adapter });
 };
 

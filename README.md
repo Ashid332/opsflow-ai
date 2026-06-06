@@ -22,9 +22,9 @@ OpsFlow AI is a modern manufacturing intelligence application designed to automa
 
 ## 🛠️ Technology Stack
 
-*   **Framework**: Next.js 15 (App Router, Tailwind CSS, TypeScript)
-*   **Database**: SQLite
-*   **ORM**: Prisma 7 (using Driver Adapter for `@prisma/adapter-better-sqlite3` and `better-sqlite3`)
+*   **Framework**: Next.js 16 (App Router, Tailwind CSS, TypeScript)
+*   **Database**: PostgreSQL (Neon.tech preferred, or Supabase)
+*   **ORM**: Prisma 7 (configured with `@prisma/adapter-neon` and `@neondatabase/serverless`)
 *   **AI Models**: Google Gemini 2.5 Flash (`@google/generative-ai`)
 *   **Icons**: Lucide React
 *   **Charts**: Recharts
@@ -69,24 +69,54 @@ OpsFlow AI is a modern manufacturing intelligence application designed to automa
 npm install
 ```
 
-### 2. Set Up Environment Variables
+### 2. Set Up Your Neon PostgreSQL Database
+1. Go to [Neon.tech](https://neon.tech/) and sign up for a free account.
+2. Create a new project and select **PostgreSQL** as the database.
+3. Copy the database connection URL from your Neon dashboard. It should look like:
+   `postgresql://[user]:[password]@[host]/[dbname]?sslmode=require`
+
+### 3. Configure Environment Variables
 Create a local `.env` file in the root directory:
 ```bash
 cp .env.example .env
 ```
-Provide your `GEMINI_API_KEY` in the `.env` file. A valid key is strictly required to process document uploads (mock fallback is disabled).
+Provide your database connection string and Gemini credentials:
+```env
+DATABASE_URL="postgresql://[user]:[password]@[host]/[dbname]?sslmode=require"
+GEMINI_API_KEY="your-google-gemini-api-key-here"
+```
 
-### 3. Initialize & Seed Database
+### 4. Initialize and Seed the Database
+Synchronize the PostgreSQL database schema and seed the initial manufacturing machines, orders, and logs:
 ```bash
 npx prisma db push
 npx prisma db seed
 ```
 
-### 4. Start Development Server
+### 5. Start Development Server
 ```bash
 npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) to view the application.
+
+---
+
+## ☁️ Vercel Deployment Guide
+
+To deploy this application to Vercel with Neon PostgreSQL support:
+
+### 1. Connect and Import the Repository
+1. Go to the [Vercel Dashboard](https://vercel.com/) and click **New Project**.
+2. Select your GitHub repository (`Ashid332/opsflow-ai`) and import it.
+
+### 2. Configure Environment Variables in Vercel
+In the project settings on Vercel, add the following environment variables:
+*   `DATABASE_URL`: Your Neon PostgreSQL connection URL.
+*   `GEMINI_API_KEY`: Your Google Gemini API key.
+
+### 3. Build & Deployment Execution
+The project is configured with a `"postinstall": "prisma generate"` script which automatically generates the serverless Prisma Client at compile time. 
+Click **Deploy** and the build will execute cleanly.
 
 ---
 
