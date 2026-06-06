@@ -59,10 +59,19 @@ export default function AnalyticsDashboard() {
   const [orders, setOrders] = useState<ProductOrder[]>([]);
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchDashboardData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 seconds timeout
+
     try {
-      const response = await fetch('/api/dashboard');
+      const response = await fetch('/api/dashboard', { signal: controller.signal });
+      clearTimeout(timeoutId);
+
       if (response.ok) {
         const data = await response.json();
         setMetrics(data.metrics);
@@ -71,9 +80,18 @@ export default function AnalyticsDashboard() {
         setQuantitySummary(data.quantitySummary);
         setOrders(data.orders);
         setLogs(data.logs);
+      } else {
+        const errText = await response.text();
+        setError(`Failed to retrieve analytics data: Server returned status ${response.status} (${errText || response.statusText})`);
       }
-    } catch (err) {
+    } catch (err: any) {
+      clearTimeout(timeoutId);
       console.error('Error fetching dashboard data:', err);
+      if (err.name === 'AbortError') {
+        setError('Request timed out. The database connection is taking too long to respond. Please check your network or try again.');
+      } else {
+        setError(`Failed to connect to analytics API: ${err.message || String(err)}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -88,6 +106,27 @@ export default function AnalyticsDashboard() {
       <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
         <RefreshCw className="h-8 w-8 text-blue-500 animate-spin" />
         <p className="text-sm text-gray-400">Loading plant analytics...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-[60vh] flex-col items-center justify-center gap-4 max-w-md mx-auto text-center px-4">
+        <div className="p-4 rounded-full bg-rose-950/30 border border-rose-900/45 text-rose-400">
+          <AlertTriangle size={32} className="animate-bounce" />
+        </div>
+        <div>
+          <h3 className="text-sm font-bold text-white uppercase tracking-wider">Analytics Load Failed</h3>
+          <p className="text-xs text-gray-400 mt-2 leading-relaxed">{error}</p>
+        </div>
+        <button
+          onClick={fetchDashboardData}
+          className="mt-2 py-2 px-5 bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white rounded-lg text-xs font-semibold shadow-lg shadow-blue-600/10 transition-all flex items-center gap-2"
+        >
+          <RefreshCw size={12} />
+          Retry Connection
+        </button>
       </div>
     );
   }

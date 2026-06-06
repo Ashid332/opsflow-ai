@@ -114,14 +114,28 @@ export async function extractFieldsFromDocument(
     console.log(`[GEMINI] Response received in ${elapsed}ms`);
 
     const responseText = result.response.text();
-    console.log(`[GEMINI] Response length: ${responseText.length} chars`);
+    console.log("RAW GEMINI RESPONSE:", responseText);
+
+    if (!responseText || responseText.trim() === '') {
+      throw new Error('Gemini API returned an empty response text.');
+    }
 
     try {
       const parsed = JSON.parse(responseText) as GeminiOcrResult;
-      console.log('[GEMINI] JSON parsed successfully');
+      console.log("PARSED JSON:", parsed);
+      console.log("EXTRACTED FIELDS:", {
+        date: parsed.date,
+        shift: parsed.shift,
+        employeeNumber: parsed.employeeNumber,
+        operationCode: parsed.operationCode,
+        machineNumber: parsed.machineNumber,
+        workOrderNumber: parsed.workOrderNumber,
+        quantityProduced: parsed.quantityProduced,
+        timeTaken: parsed.timeTaken,
+      });
       return parsed;
     } catch (parseError) {
-      console.error('[GEMINI] Failed to parse response JSON:', responseText.substring(0, 500));
+      console.error('[GEMINI] Failed to parse response JSON:', responseText);
       throw new Error(`Failed to parse Gemini response as JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
     }
   } catch (error) {

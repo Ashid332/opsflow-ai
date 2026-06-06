@@ -1,22 +1,33 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 
+async function withTimeout<T>(promise: Promise<T>, ms: number = 5000): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Database query timed out')), ms)
+    )
+  ]);
+}
+
 export async function GET() {
   try {
-    const orders = await prisma.productOrder.findMany({
+    console.log('[DASHBOARD-API] Querying database with 5s timeout protection...');
+    const orders = await withTimeout(prisma.productOrder.findMany({
       orderBy: { createdAt: 'desc' },
-    });
+    }));
 
-    const inspections = await prisma.qualityInspection.findMany({
+    const inspections = await withTimeout(prisma.qualityInspection.findMany({
       include: { order: true },
-    });
+    }));
 
-    const logs = await prisma.systemLog.findMany({
+    const logs = await withTimeout(prisma.systemLog.findMany({
       orderBy: { timestamp: 'desc' },
       take: 20,
-    });
+    }));
 
-    const machines = await prisma.machine.findMany();
+    const machines = await withTimeout(prisma.machine.findMany());
+    console.log('[DASHBOARD-API] Database queries completed successfully');
 
     // 1. Core Analytics Metrics
     const totalUploads = orders.length;
