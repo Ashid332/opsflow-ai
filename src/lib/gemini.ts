@@ -22,9 +22,6 @@ export interface GeminiOcrResult {
   rawTextTranscription: string;
 }
 
-const apiKey = process.env.GEMINI_API_KEY || '';
-const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
-
 // Strictly typed JSON schema for Gemini response using SDK Schema type
 const responseSchema: Schema = {
   type: SchemaType.OBJECT,
@@ -59,14 +56,26 @@ const responseSchema: Schema = {
   ]
 };
 
+function getGeminiClient(): GoogleGenerativeAI {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey.trim() === '' || apiKey === 'your-google-gemini-api-key-here') {
+    throw new Error(
+      'GEMINI_API_KEY is not configured. ' +
+      'Please set a valid Google Gemini API key in your environment variables. ' +
+      'Get a free key at https://aistudio.google.com/apikey'
+    );
+  }
+  return new GoogleGenerativeAI(apiKey);
+}
+
 export async function extractFieldsFromDocument(
   fileBuffer: Buffer,
   mimeType: string
 ): Promise<GeminiOcrResult> {
-  if (!genAI) {
-    throw new Error('GEMINI_API_KEY environment variable is not configured. Real Gemini Vision OCR is required and mock fallback is disabled.');
-  }
+  console.log('[GEMINI] Initializing Gemini client...');
+  const genAI = getGeminiClient();
 
+  console.log('[GEMINI] Creating model instance (gemini-2.5-flash)...');
   const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
   const prompt = `
@@ -76,27 +85,49 @@ export async function extractFieldsFromDocument(
     Be precise. For each field, estimate an OCR reading confidence score (0.0 to 1.0) based on readability, alignment, and clarity.
   `;
 
-  const result = await model.generateContent({
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          { text: prompt },
-          {
-            inlineData: {
-              mimeType,
-              data: fileBuffer.toString('base64'),
-            },
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      responseSchema: responseSchema,
-    },
-  });
+  console.log(`[GEMINI] Sending request (${fileBuffer.length} bytes, ${mimeType})...`);
+  const requestStart = Date.now();
 
-  const responseText = result.response.text();
-  return JSON.parse(responseText) as GeminiOcrResult;
+  try {
+    const result = await model.generateContent({
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType,
+                data: fileBuffer.toString('base64'),
+              },
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: responseSchema,
+      },
+    });
+
+    const elapsed = Date.now() - requestStart;
+    console.log(`[GEMINI] Response received in ${elapsed}ms`);
+
+    const responseText = result.response.text();
+    console.log(`[GEMINI] Response length: ${responseText.length} chars`);
+
+    try {
+      const parsed = JSON.parse(responseText) as GeminiOcrResult;
+      console.log('[GEMINI] JSON parsed successfully');
+      return parsed;
+    } catch (parseError) {
+      console.error('[GEMINI] Failed to parse response JSON:', responseText.substring(0, 500));
+      throw new Error(`Failed to parse Gemini response as JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+    }
+  } catch (error) {
+    const elapsed = Date.now() - requestStart;
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[GEMINI] API call failed after ${elapsed}ms:`, errorMsg);
+    throw error;
+  }
 }
