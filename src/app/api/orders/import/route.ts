@@ -11,7 +11,6 @@ export async function POST(request: NextRequest) {
 
   try {
     // Stage 1: Parse form data & Detect MIME type
-    console.log('[UPLOAD] Stage 1: Parsing form data...');
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
 
@@ -36,7 +35,9 @@ export async function POST(request: NextRequest) {
       else if (fileExtension === 'webp') mimeType = 'image/webp';
     }
 
-    console.log(`[UPLOAD] Stage 1 Success: File received: "${fileName}" (Original MIME: "${rawMimeType}", Resolved MIME: "${mimeType}", Size: ${file.size} bytes)`);
+    console.log("Upload received:", fileName);
+    console.log("File type:", mimeType);
+    console.log("File size:", file.size);
 
     // Validate file type
     const allowedMimeTypes = [
@@ -55,10 +56,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Stage 2: Read file buffer
-    console.log('[UPLOAD] Stage 2: Reading file buffer...');
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    console.log(`[UPLOAD] Stage 2 Success: Buffer read: ${buffer.length} bytes`);
 
     if (buffer.length === 0) {
       console.error('[UPLOAD] Stage 2 Error: Uploaded file buffer is empty');
@@ -68,31 +67,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Stage 3: Save file to public/uploads (best-effort, non-blocking for deployment)
+    // Stage 3: Save file to public/uploads
     let fileUrl = '';
     try {
-      console.log('[UPLOAD] Stage 3: Saving file to uploads directory...');
       const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
       await fs.mkdir(uploadsDir, { recursive: true });
       const uniqueFileName = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}.${fileExtension || 'pdf'}`;
       const filePath = path.join(uploadsDir, uniqueFileName);
       await fs.writeFile(filePath, buffer);
       fileUrl = `/uploads/${uniqueFileName}`;
-      console.log(`[UPLOAD] Stage 3 Success: File saved to: ${fileUrl}`);
+      console.log("File saved:", fileUrl);
     } catch (fsError) {
       // On serverless (Vercel), filesystem writes may fail — this is expected
       const fsErrorMsg = fsError instanceof Error ? fsError.message : String(fsError);
       console.warn('[UPLOAD] Stage 3 Warning: File save failed (expected on serverless):', fsErrorMsg);
       fileUrl = `/uploads/ephemeral-${Date.now()}.${fileExtension || 'pdf'}`;
+      console.log("File saved:", fileUrl);
     }
 
     // Stage 4: Gemini Vision OCR
-    console.log('[UPLOAD] Stage 4: Starting Gemini Vision OCR...');
     const apiKey = process.env.GEMINI_API_KEY;
     const apiKeyExists = !!apiKey;
     const apiKeyLength = apiKey ? apiKey.length : 0;
     const apiKeyPrefix = apiKey ? apiKey.substring(0, 10) : 'none';
-    console.log(`[UPLOAD] GEMINI_API_KEY validation check - Exists: ${apiKeyExists}, Length: ${apiKeyLength}, Prefix: "${apiKeyPrefix}..."`);
     
     if (!apiKey || apiKey.trim() === '' || apiKey === 'your-google-gemini-api-key-here') {
       console.error('[UPLOAD] Stage 4 Error: GEMINI_API_KEY is not set or contains default placeholder');
@@ -102,44 +99,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    console.log("Gemini client initialized");
+
     let ocrResult;
     try {
-      console.log(`[UPLOAD] Calling extractFieldsFromDocument with buffer length: ${buffer.length}, MIME: "${mimeType}"...`);
+      console.log("Gemini request started");
       ocrResult = await extractFieldsFromDocument(buffer, mimeType);
-      console.log('[UPLOAD] Stage 4 Success: OCR response parsed from Gemini API.');
+      console.log("Gemini response received");
     } catch (ocrError) {
-      const errorMessage = ocrError instanceof Error ? ocrError.message : String(ocrError);
-      const errorStack = ocrError instanceof Error ? ocrError.stack : '';
-      console.error('[UPLOAD] Stage 4 Error: Gemini OCR failed:', errorMessage);
-      console.error('[UPLOAD] Stage 4 Gemini Error Stack:', errorStack);
-      
-      if (errorMessage.includes('API_KEY') || errorMessage.includes('API key')) {
-        return NextResponse.json(
-          { error: 'Gemini API key is invalid or not configured. Please check your GEMINI_API_KEY environment variable.' },
-          { status: 503 }
-        );
-      }
-      if (errorMessage.includes('SAFETY') || errorMessage.includes('blocked')) {
-        return NextResponse.json(
-          { error: 'Document was blocked by Gemini safety filters. Please try a different document.' },
-          { status: 422 }
-        );
-      }
-      if (errorMessage.includes('quota') || errorMessage.includes('rate')) {
-        return NextResponse.json(
-          { error: 'Gemini API rate limit reached. Please wait a moment and try again.' },
-          { status: 429 }
-        );
-      }
-
-      return NextResponse.json(
-        { error: `OCR processing failed: ${errorMessage}` },
+      console.error("FULL OCR ERROR:", ocrError);
+      return Response.json(
+        {
+          success: false,
+          error: String(ocrError),
+          stack: (ocrError as any)?.stack
+        },
         { status: 500 }
       );
     }
 
     // Stage 4.5: Sanitize & Normalize OCR fields to prevent runtime exceptions
-    console.log('[UPLOAD] Stage 4.5: Sanitizing and normalizing extracted fields...');
     const sanitizedOcrResult = {
       date: typeof ocrResult?.date === 'string' ? ocrResult.date.trim() : '',
       shift: typeof ocrResult?.shift === 'string' ? ocrResult.shift.trim() : '',
@@ -165,14 +144,9 @@ export async function POST(request: NextRequest) {
         timeTaken: typeof ocrResult?.confidence?.timeTaken === 'number' && !isNaN(ocrResult.confidence.timeTaken) ? ocrResult.confidence.timeTaken : 0,
       }
     };
-    console.log('[UPLOAD] Stage 4.5 Success: Sanitized OCR data values:', {
-      workOrderNumber: sanitizedOcrResult.workOrderNumber,
-      machineNumber: sanitizedOcrResult.machineNumber,
-      quantityProduced: sanitizedOcrResult.quantityProduced,
-    });
+    console.log("OCR parsing completed");
 
     // Stage 5: Validation Rules Engine
-    console.log('[UPLOAD] Stage 5: Running validation rules engine...');
     const validationErrors: string[] = [];
 
     // Check 1: Target limit
@@ -211,10 +185,9 @@ export async function POST(request: NextRequest) {
     }
 
     const hasBlockers = validationErrors.some(e => e.startsWith('Blocker:'));
-    console.log(`[UPLOAD] Stage 5 Success: Validation complete: ${validationErrors.length} issues found (${hasBlockers ? 'HAS BLOCKERS' : 'no blockers'})`);
 
     // Stage 6: Create database records
-    console.log('[UPLOAD] Stage 6: Creating database records...');
+    console.log("Database write started");
     
     let order;
     let inspection;
@@ -237,7 +210,6 @@ export async function POST(request: NextRequest) {
           status: hasBlockers ? 'SUSPENDED' : 'PENDING',
         },
       });
-      console.log(`[UPLOAD] Stage 6 DB Write: ProductOrder created with ID: ${order.id}`);
 
       const extractionMetadata = {
         fileName,
@@ -265,7 +237,6 @@ export async function POST(request: NextRequest) {
           notes: JSON.stringify(extractionMetadata),
         },
       });
-      console.log(`[UPLOAD] Stage 6 DB Write: QualityInspection created with ID: ${inspection.id}`);
 
       // Create system log
       await prisma.systemLog.create({
@@ -276,14 +247,15 @@ export async function POST(request: NextRequest) {
           orderId: order.id,
         },
       });
-      console.log('[UPLOAD] Stage 6 DB Write: SystemLog created successfully.');
+      console.log("Database write completed");
     } catch (dbError) {
-      const dbErrorMsg = dbError instanceof Error ? dbError.message : String(dbError);
-      const dbErrorStack = dbError instanceof Error ? dbError.stack : '';
-      console.error('[UPLOAD] Stage 6 Error: Database operations failed:', dbErrorMsg);
-      console.error('[UPLOAD] Stage 6 Database Error Stack:', dbErrorStack);
-      return NextResponse.json(
-        { error: `Database error while saving records: ${dbErrorMsg}` },
+      console.error("FULL OCR ERROR:", dbError);
+      return Response.json(
+        {
+          success: false,
+          error: String(dbError),
+          stack: (dbError as any)?.stack
+        },
         { status: 500 }
       );
     }
@@ -297,13 +269,13 @@ export async function POST(request: NextRequest) {
       inspection,
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const errorStack = error instanceof Error ? error.stack : '';
-    console.error(`[UPLOAD] Unhandled error processing '${fileName}':`, errorMessage);
-    console.error('[UPLOAD] Stack trace:', errorStack);
-    
-    return NextResponse.json(
-      { error: `Upload processing failed due to server error: ${errorMessage}` },
+    console.error("FULL OCR ERROR:", error);
+    return Response.json(
+      {
+        success: false,
+        error: String(error),
+        stack: (error as any)?.stack
+      },
       { status: 500 }
     );
   }
