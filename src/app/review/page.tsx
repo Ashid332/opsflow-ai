@@ -119,12 +119,12 @@ export default function ReviewQueuePage() {
 
   useEffect(() => {
     if (expandedPreviewId) {
+      setPreviewFilesAvailability(prev => ({ ...prev, [expandedPreviewId]: 'checking' }));
       const ins = inspections.find(i => i.id === expandedPreviewId);
       if (ins && ins.notes) {
         try {
           const meta = JSON.parse(ins.notes);
           if (meta.fileUrl) {
-            setPreviewFilesAvailability(prev => ({ ...prev, [expandedPreviewId]: 'checking' }));
             fetch(meta.fileUrl, { method: 'HEAD' })
               .then(res => {
                 setPreviewFilesAvailability(prev => ({ ...prev, [expandedPreviewId]: res.ok }));
@@ -430,10 +430,10 @@ export default function ReviewQueuePage() {
 
                           {meta.fileUrl && (previewTabs[ins.id] || 'document') === 'document' ? (
                             <div className="flex-1 flex flex-col justify-center items-center bg-[#0c101b] rounded-lg p-2 overflow-hidden min-h-[380px]">
-                              {previewFilesAvailability[ins.id] === 'checking' ? (
+                              {previewFilesAvailability[ins.id] === 'checking' || previewFilesAvailability[ins.id] === undefined ? (
                                 <div className="flex flex-col justify-center items-center min-h-[350px] space-y-2">
                                   <RefreshCw className="h-5 w-5 text-blue-500 animate-spin" />
-                                  <span className="text-[9px] text-gray-500">Checking preview availability...</span>
+                                  <span className="text-[9px] text-gray-500 font-sans">Verifying document preview availability...</span>
                                 </div>
                               ) : previewFilesAvailability[ins.id] === false ? (
                                 <div className="flex flex-col justify-center items-center p-5 text-center min-h-[350px] space-y-3">

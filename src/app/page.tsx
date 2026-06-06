@@ -457,7 +457,7 @@ export default function DocumentCenter() {
                   {previewFileAvailable === 'checking' ? (
                     <div className="flex flex-col justify-center items-center min-h-[450px] space-y-2">
                       <Loader2 className="h-6 w-6 text-blue-500 animate-spin" />
-                      <span className="text-[10px] text-gray-500">Checking preview availability...</span>
+                      <span className="text-[10px] text-gray-500 font-sans">Verifying document preview availability...</span>
                     </div>
                   ) : previewFileAvailable === false ? (
                     <div className="flex flex-col justify-center items-center p-5 text-center min-h-[450px] space-y-4">

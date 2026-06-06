@@ -248,7 +248,7 @@ export default function AnalyticsDashboard() {
         <div className="lg:col-span-2 bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm flex flex-col">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-sm font-bold text-white">Recently Extracted Jobs</h3>
-            <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest font-mono">PostgreSQL Live Status</span>
+            <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest font-mono">PostgreSQL Active</span>
           </div>
           
           <div className="overflow-x-auto">
