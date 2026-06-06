@@ -1,10 +1,10 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaNeon } from '@prisma/adapter-neon';
-import { Pool, neonConfig } from '@neondatabase/serverless';
+import { neonConfig } from '@neondatabase/serverless';
 import ws from 'ws';
 
 // Set WebSocket constructor for local Node.js environment
-if (typeof globalThis.WebSocket === 'undefined' && typeof window === 'undefined') {
+if (typeof window === 'undefined') {
   neonConfig.webSocketConstructor = ws;
 }
 
@@ -14,8 +14,7 @@ const globalForPrisma = globalThis as unknown as {
 
 const getPrismaClient = () => {
   const connectionString = process.env.DATABASE_URL || 'postgresql://placeholder-host:5432/placeholder-db';
-  const pool = new Pool({ connectionString });
-  const adapter = new PrismaNeon(pool as any);
+  const adapter = new PrismaNeon({ connectionString });
   return new PrismaClient({ adapter });
 };
 

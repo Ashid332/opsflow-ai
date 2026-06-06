@@ -1,6 +1,7 @@
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaNeon } from '@prisma/adapter-neon';
-import { Pool, neonConfig } from '@neondatabase/serverless';
+import { neonConfig } from '@neondatabase/serverless';
 import ws from 'ws';
 
 // Set WebSocket constructor for local Node.js environment
@@ -8,12 +9,19 @@ if (typeof globalThis.WebSocket === 'undefined') {
   neonConfig.webSocketConstructor = ws;
 }
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://placeholder-host:5432/placeholder-db';
-const pool = new Pool({ connectionString });
-const adapter = new PrismaNeon(pool as any);
-const prisma = new PrismaClient({ adapter });
+function getPrismaClient() {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString || connectionString.includes('placeholder')) {
+    throw new Error('DATABASE_URL is not set. Please configure it in your .env file.');
+  }
+  console.log(`Connecting to: ${connectionString.substring(0, 40)}...`);
+  const adapter = new PrismaNeon({ connectionString });
+  return new PrismaClient({ adapter });
+}
 
 async function main() {
+  const prisma = getPrismaClient();
+
   console.log('Clearing database...');
   await prisma.systemLog.deleteMany({});
   await prisma.qualityInspection.deleteMany({});
@@ -29,7 +37,7 @@ async function main() {
         efficiency: 94.5,
         temperature: 42.1,
         uptime: 98.2,
-        lastMaintenance: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // 5 days ago
+        lastMaintenance: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
       },
     }),
     prisma.machine.create({
@@ -39,7 +47,7 @@ async function main() {
         efficiency: 88.2,
         temperature: 68.4,
         uptime: 95.1,
-        lastMaintenance: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), // 12 days ago
+        lastMaintenance: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000),
       },
     }),
     prisma.machine.create({
@@ -49,7 +57,7 @@ async function main() {
         efficiency: 0.0,
         temperature: 21.3,
         uptime: 91.4,
-        lastMaintenance: new Date(), // Today
+        lastMaintenance: new Date(),
       },
     }),
     prisma.machine.create({
@@ -59,7 +67,7 @@ async function main() {
         efficiency: 96.8,
         temperature: 31.5,
         uptime: 99.5,
-        lastMaintenance: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
+        lastMaintenance: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
       },
     }),
     prisma.machine.create({
@@ -69,7 +77,7 @@ async function main() {
         efficiency: 92.1,
         temperature: 26.8,
         uptime: 97.4,
-        lastMaintenance: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
+        lastMaintenance: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
       },
     }),
   ]);
@@ -82,7 +90,7 @@ async function main() {
         status: 'RUNNING',
         quantity: 342,
         targetQuantity: 500,
-        startDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000), // 1 day ago
+        startDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
       },
     }),
     prisma.productOrder.create({
@@ -101,7 +109,7 @@ async function main() {
         status: 'RUNNING',
         quantity: 85,
         targetQuantity: 250,
-        startDate: new Date(Date.now() - 8 * 60 * 60 * 1000), // 8 hours ago
+        startDate: new Date(Date.now() - 8 * 60 * 60 * 1000),
       },
     }),
     prisma.productOrder.create({
@@ -124,7 +132,6 @@ async function main() {
   ]);
 
   console.log('Seeding quality inspections...');
-  // Completed order has approved inspection
   await prisma.qualityInspection.create({
     data: {
       orderId: orders[1].id,
@@ -135,7 +142,6 @@ async function main() {
     },
   });
 
-  // Suspended order has a rejected inspection (which is why it is suspended)
   await prisma.qualityInspection.create({
     data: {
       orderId: orders[3].id,
@@ -146,7 +152,6 @@ async function main() {
     },
   });
 
-  // Running order has a pending inspection
   await prisma.qualityInspection.create({
     data: {
       orderId: orders[0].id,
