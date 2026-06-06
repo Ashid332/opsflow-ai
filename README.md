@@ -54,7 +54,7 @@ OpsFlow AI is a modern manufacturing intelligence application designed to automa
 │   ├── components/          # Reusable UI parts (Header, Sidebar, Charts)
 │   └── lib/
 │       ├── db.ts            # Prisma client instantiation with Better SQLite3
-│       └── gemini.ts        # Gemini SDK configuration, OCR prompt, & mock fallback
+│       └── gemini.ts        # Gemini SDK configuration & OCR prompt
 ├── .env.example             # Template for local environment configuration
 ├── tsconfig.json            # TypeScript build configuration
 └── package.json             # NPM dependencies and project scripts
@@ -74,7 +74,7 @@ Create a local `.env` file in the root directory:
 ```bash
 cp .env.example .env
 ```
-Provide your `GEMINI_API_KEY` in the `.env` file. If no key is provided, the application will fallback to a simulated high-fidelity mock OCR engine.
+Provide your `GEMINI_API_KEY` in the `.env` file. A valid key is strictly required to process document uploads (mock fallback is disabled).
 
 ### 3. Initialize & Seed Database
 ```bash
