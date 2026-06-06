@@ -8,7 +8,20 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { status, inspectorName, orderName, targetQuantity, machineName, shiftName, comments } = body;
+    
+    const { 
+      status, 
+      inspectorName, 
+      date, 
+      shift, 
+      employeeNumber, 
+      operationCode, 
+      machineName, 
+      workOrderNumber, 
+      targetQuantity, 
+      timeTaken, 
+      comments 
+    } = body;
 
     if (!status || !['APPROVED', 'REJECTED'].includes(status)) {
       return NextResponse.json({ error: 'Invalid review status' }, { status: 400 });
@@ -25,11 +38,26 @@ export async function POST(
 
     let currentMeta = {
       fileName: 'document.pdf',
-      originalText: '',
-      shift: shiftName || 'Morning Shift',
-      machineName: machineName || 'Assembly Line A (CNC)',
-      confidence: { name: 1.0, targetQuantity: 1.0, machineName: 1.0, shift: 1.0 },
+      date: date || '',
+      shift: shift || 'Morning Shift',
+      employeeNumber: employeeNumber || '',
+      operationCode: operationCode || '',
+      machineName: machineName || '',
+      workOrderNumber: workOrderNumber || '',
+      quantityProduced: targetQuantity !== undefined ? targetQuantity : 0,
+      timeTaken: timeTaken || '',
+      confidence: {
+        date: 1.0,
+        shift: 1.0,
+        employeeNumber: 1.0,
+        operationCode: 1.0,
+        machineName: 1.0,
+        workOrderNumber: 1.0,
+        quantityProduced: 1.0,
+        timeTaken: 1.0
+      },
       validationErrors: [] as string[],
+      originalText: ''
     };
 
     try {
@@ -38,47 +66,75 @@ export async function POST(
         currentMeta = { ...currentMeta, ...parsed };
       }
     } catch (e) {
-      // Use fallback metadata
+      // Use defaults
     }
 
-    // Update metadata with corrected values
-    currentMeta.shift = shiftName || currentMeta.shift;
-    currentMeta.machineName = machineName || currentMeta.machineName;
+    // Apply human corrected values and set confidence to 100% (1.0)
+    if (date !== undefined) {
+      currentMeta.date = date;
+      currentMeta.confidence.date = 1.0;
+    }
+    if (shift !== undefined) {
+      currentMeta.shift = shift;
+      currentMeta.confidence.shift = 1.0;
+    }
+    if (employeeNumber !== undefined) {
+      currentMeta.employeeNumber = employeeNumber;
+      currentMeta.confidence.employeeNumber = 1.0;
+    }
+    if (operationCode !== undefined) {
+      currentMeta.operationCode = operationCode;
+      currentMeta.confidence.operationCode = 1.0;
+    }
+    if (machineName !== undefined) {
+      currentMeta.machineName = machineName;
+      currentMeta.confidence.machineName = 1.0;
+    }
+    if (workOrderNumber !== undefined) {
+      currentMeta.workOrderNumber = workOrderNumber;
+      currentMeta.confidence.workOrderNumber = 1.0;
+    }
+    if (targetQuantity !== undefined) {
+      currentMeta.quantityProduced = targetQuantity;
+      currentMeta.confidence.quantityProduced = 1.0;
+    }
+    if (timeTaken !== undefined) {
+      currentMeta.timeTaken = timeTaken;
+      currentMeta.confidence.timeTaken = 1.0;
+    }
 
-    // Human edits set confidence score for edited fields to 1.0
-    if (orderName) currentMeta.confidence.name = 1.0;
-    if (targetQuantity) currentMeta.confidence.targetQuantity = 1.0;
-    currentMeta.confidence.machineName = 1.0;
-    currentMeta.confidence.shift = 1.0;
-
-    // Re-run validation rules on the newly corrected fields
+    // Re-evaluate validation constraints on the corrected inputs
     const validationErrors: string[] = [];
-    const parsedQty = targetQuantity !== undefined ? parseInt(targetQuantity, 10) : inspection.order.targetQuantity;
-    const finalMachineName = machineName || currentMeta.machineName;
-    const finalOrderName = orderName || inspection.order.name;
+    const parsedQty = currentMeta.quantityProduced;
+    const finalMachineName = currentMeta.machineName;
+    const finalWorkOrderNumber = currentMeta.workOrderNumber;
+    const finalEmployeeNumber = currentMeta.employeeNumber;
 
     if (parsedQty > 1000) {
-      validationErrors.push(`Blocker: Target quantity (${parsedQty}) exceeds standard machine batch capacity of 1000 units.`);
+      validationErrors.push(`Blocker: Extracted quantity (${parsedQty}) exceeds standard machine batch capacity of 1000 units.`);
     }
 
     const dbMachines = await prisma.machine.findMany();
-    const machineExists = dbMachines.some(m => m.name.toLowerCase() === finalMachineName.toLowerCase());
+    const machineExists = dbMachines.some(
+      m => m.name.toLowerCase() === finalMachineName.toLowerCase()
+    );
     if (!machineExists) {
       validationErrors.push(`Blocker: Assigned machine '${finalMachineName}' is not registered in active plant assets.`);
     }
 
-    if (!/#\d+/.test(finalOrderName)) {
-      validationErrors.push(`Warning: Order name lacks a specific tracking identifier (e.g. #ID).`);
+    if (!finalEmployeeNumber || finalEmployeeNumber.trim() === '') {
+      validationErrors.push(`Warning: Missing or unrecognized Employee Number.`);
     }
 
     currentMeta.validationErrors = validationErrors;
+    const hasBlockers = validationErrors.some(e => e.startsWith('Blocker:'));
 
     // Update inspection record
     const updatedInspection = await prisma.qualityInspection.update({
       where: { id },
       data: {
         status,
-        inspectorName: inspectorName || 'QA Engineer',
+        inspectorName: inspectorName || 'QA Supervisor',
         defectCount: validationErrors.filter(e => e.startsWith('Blocker:')).length,
         notes: JSON.stringify(currentMeta),
       },
@@ -87,17 +143,19 @@ export async function POST(
     // Update order status based on review decision
     let orderStatus = inspection.order.status;
     if (status === 'APPROVED') {
-      // If approved, check if blockers are still present.
-      const hasBlockers = validationErrors.some(e => e.startsWith('Blocker:'));
       orderStatus = hasBlockers ? 'SUSPENDED' : 'COMPLETED';
     } else if (status === 'REJECTED') {
       orderStatus = 'SUSPENDED';
     }
 
+    const orderNameMapping = finalWorkOrderNumber.startsWith('WO-') 
+      ? `Work Order ${finalWorkOrderNumber}` 
+      : finalWorkOrderNumber;
+
     await prisma.productOrder.update({
       where: { id: inspection.orderId },
       data: {
-        name: finalOrderName,
+        name: orderNameMapping || inspection.order.name,
         targetQuantity: parsedQty,
         status: orderStatus,
       },
@@ -106,7 +164,7 @@ export async function POST(
     // Create system log
     const action = status === 'APPROVED' ? 'DOC_VALIDATE' : 'DOC_REJECT';
     const severity = status === 'APPROVED' ? 'INFO' : 'ERROR';
-    const details = `Document '${currentMeta.fileName}' was ${status} by ${inspectorName || 'QA Engineer'}. Errors remaining: ${validationErrors.length}. Comments: ${comments || 'None'}`;
+    const details = `Document '${currentMeta.fileName}' (WO: ${finalWorkOrderNumber}) was ${status} by verifier ${inspectorName || 'QA Supervisor'}. Blockers left: ${validationErrors.filter(e => e.startsWith('Blocker:')).length}.`;
 
     await prisma.systemLog.create({
       data: {

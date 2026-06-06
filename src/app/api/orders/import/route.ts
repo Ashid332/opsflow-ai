@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { extractFieldsFromDocument } from '@/lib/gemini';
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,124 +12,85 @@ export async function POST(request: NextRequest) {
     }
 
     const fileName = file.name;
-    const fileText = await file.text();
+    const mimeType = file.type || 'application/pdf';
+    
+    // Read raw buffer from file
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
-    // 1. Generate Mock Extraction Fields (representing AI OCR output)
-    let extractedName = 'Batch Run Sheet';
-    let targetQuantity = 500;
-    let machineName = 'Assembly Line A (CNC)';
-    let shiftName = 'Morning Shift';
+    // Call Gemini Vision OCR helper
+    const ocrResult = await extractFieldsFromDocument(buffer, mimeType);
 
-    // Parse simple CSV/JSON if provided, otherwise randomize mock values
-    if (fileName.endsWith('.json')) {
-      try {
-        const parsed = JSON.parse(fileText);
-        extractedName = parsed.name || extractedName;
-        targetQuantity = parsed.targetQuantity || targetQuantity;
-        machineName = parsed.machine || machineName;
-        shiftName = parsed.shift || shiftName;
-      } catch (e) {
-        // Fallback to defaults
-      }
-    } else if (fileName.endsWith('.csv')) {
-      const lines = fileText.split('\n');
-      for (const line of lines) {
-        const parts = line.split(',');
-        if (parts.length >= 2 && !line.toLowerCase().includes('name')) {
-          extractedName = parts[0]?.trim() || extractedName;
-          targetQuantity = parseInt(parts[1]?.trim() || '500', 10);
-          if (parts[2]) machineName = parts[2].trim();
-          if (parts[3]) shiftName = parts[3].trim();
-          break;
-        }
-      }
-    } else {
-      // General file (PDF/Image) mock extraction
-      const rand = Math.random();
-      if (rand < 0.3) {
-        extractedName = 'Valves Production #982';
-        targetQuantity = 1200; // Will trigger quantity validation error
-        machineName = 'Assembly Line A (CNC)';
-        shiftName = 'Afternoon Shift';
-      } else if (rand < 0.6) {
-        extractedName = 'Piston Castings Batch'; // Unclear name -> warning
-        targetQuantity = 450;
-        machineName = 'Laser Cutter F'; // Will trigger machine validation error
-        shiftName = 'Night Shift';
-      } else {
-        extractedName = 'Auto-Chassis Batch #512';
-        targetQuantity = 750;
-        machineName = 'Welding Robot B';
-        shiftName = 'Morning Shift';
-      }
-    }
-
-    // 2. Generate Confidence Indicators (0.0 to 1.0)
-    const confName = parseFloat((0.85 + Math.random() * 0.14).toFixed(2));
-    const confQty = targetQuantity === 1200 ? 0.72 : parseFloat((0.80 + Math.random() * 0.19).toFixed(2)); // purposefully low confidence for test
-    const confMachine = machineName === 'Laser Cutter F' ? 0.65 : parseFloat((0.90 + Math.random() * 0.09).toFixed(2));
-    const confShift = parseFloat((0.88 + Math.random() * 0.11).toFixed(2));
-
-    // 3. Evaluate Validation Panel Checks
+    // Run AI Rules Engine Validation Checks
     const validationErrors: string[] = [];
-    
+
     // Check 1: Target limit
-    if (targetQuantity > 1000) {
-      validationErrors.push(`Blocker: Target quantity (${targetQuantity}) exceeds standard machine batch capacity of 1000 units.`);
+    if (ocrResult.quantityProduced > 1000) {
+      validationErrors.push(`Blocker: Extracted quantity (${ocrResult.quantityProduced}) exceeds standard machine batch capacity of 1000 units.`);
     }
-    
-    // Check 2: Machine validation
+
+    // Check 2: Machine registry check
     const dbMachines = await prisma.machine.findMany();
-    const machineExists = dbMachines.some(m => m.name.toLowerCase() === machineName.toLowerCase());
+    const machineExists = dbMachines.some(
+      m => m.name.toLowerCase() === ocrResult.machineNumber.toLowerCase()
+    );
     if (!machineExists) {
-      validationErrors.push(`Blocker: Assigned machine '${machineName}' is not registered in active plant assets.`);
+      validationErrors.push(`Blocker: Assigned machine '${ocrResult.machineNumber}' is not registered in active plant assets.`);
     }
 
-    // Check 3: Name pattern warnings
-    if (!/#\d+/.test(extractedName)) {
-      validationErrors.push(`Warning: Order name lacks a specific tracking identifier (e.g. #ID).`);
+    // Check 3: Check low confidence ratings (Warning threshold 75%)
+    Object.entries(ocrResult.confidence).forEach(([field, score]) => {
+      if (score < 0.75) {
+        // Format field name for user readability
+        const fieldNameFormatted = field
+          .replace(/([A-Z])/g, ' $1')
+          .replace(/^./, str => str.toUpperCase());
+        validationErrors.push(`Warning: Low OCR reading confidence (${Math.round(score * 100)}%) on '${fieldNameFormatted}'.`);
+      }
+    });
+
+    // Check 4: Check if employee ID format is valid
+    if (!ocrResult.employeeNumber || ocrResult.employeeNumber.trim() === '') {
+      validationErrors.push(`Warning: Missing or unrecognized Employee Number.`);
     }
 
-    // Check 4: Low confidence warnings
-    if (confQty < 0.80) {
-      validationErrors.push(`Warning: Low OCR reading confidence (${Math.round(confQty * 100)}%) on Target Quantity.`);
-    }
-    if (confMachine < 0.80) {
-      validationErrors.push(`Warning: Low OCR reading confidence (${Math.round(confMachine * 100)}%) on Assigned Machine.`);
-    }
+    const hasBlockers = validationErrors.some(e => e.startsWith('Blocker:'));
 
-    // 4. Create database records using existing models
+    // Create database records using existing models
+    const orderNameMapping = ocrResult.workOrderNumber.startsWith('WO-') 
+      ? `Work Order ${ocrResult.workOrderNumber}` 
+      : ocrResult.workOrderNumber;
+
     const order = await prisma.productOrder.create({
       data: {
-        name: extractedName,
-        targetQuantity: targetQuantity,
+        name: orderNameMapping,
+        targetQuantity: ocrResult.quantityProduced,
         quantity: 0, // Not yet started
-        status: validationErrors.some(e => e.startsWith('Blocker:')) ? 'SUSPENDED' : 'PENDING',
+        status: hasBlockers ? 'SUSPENDED' : 'PENDING',
       },
     });
 
-    const mockOcrText = `[SCAN SHEET HEADER]\nDOCUMENT TYPE: WORK ORDER RUN SHEET\nFILE: ${fileName}\nTIMESTAMP: ${new Date().toISOString()}\n---------------------------------------\nBATCH NAME: ${extractedName}\nTARGET QTY: ${targetQuantity} units\nMACHINE TARGET: ${machineName}\nSHIFT TARGET: ${shiftName}\nQA SIGN-OFF REQUIRED: YES\n[FOOTER BARCODE SIGNATURE]`;
-
     const extractionMetadata = {
       fileName,
-      originalText: mockOcrText,
-      shift: shiftName,
-      machineName: machineName,
-      confidence: {
-        name: confName,
-        targetQuantity: confQty,
-        machineName: confMachine,
-        shift: confShift
-      },
+      date: ocrResult.date,
+      shift: ocrResult.shift,
+      employeeNumber: ocrResult.employeeNumber,
+      operationCode: ocrResult.operationCode,
+      machineName: ocrResult.machineNumber,
+      workOrderNumber: ocrResult.workOrderNumber,
+      quantityProduced: ocrResult.quantityProduced,
+      timeTaken: ocrResult.timeTaken,
+      confidence: ocrResult.confidence,
+      originalText: ocrResult.rawTextTranscription,
       validationErrors,
     };
 
     const inspection = await prisma.qualityInspection.create({
       data: {
         orderId: order.id,
-        inspectorName: 'AI Extraction Agent',
+        inspectorName: ocrResult.employeeNumber || 'AI OCR Agent',
         status: 'PENDING',
-        defectCount: validationErrors.filter(e => e.startsWith('Blocker:')).length, // mapping validation blockages to defects
+        defectCount: validationErrors.filter(e => e.startsWith('Blocker:')).length,
         notes: JSON.stringify(extractionMetadata),
       },
     });
@@ -136,9 +98,9 @@ export async function POST(request: NextRequest) {
     // Create system log
     await prisma.systemLog.create({
       data: {
-        action: 'DOC_UPLOAD',
-        details: `Uploaded document '${fileName}'. AI extracted order '${extractedName}' with ${validationErrors.length} validation tags.`,
-        severity: validationErrors.some(e => e.startsWith('Blocker:')) ? 'WARNING' : 'INFO',
+        action: 'DOC_OCR_SCAN',
+        details: `Gemini OCR scanned '${fileName}'. Extracted ${ocrResult.workOrderNumber} with ${validationErrors.length} validation tags.`,
+        severity: hasBlockers ? 'WARNING' : 'INFO',
         orderId: order.id,
       },
     });
@@ -149,7 +111,7 @@ export async function POST(request: NextRequest) {
       inspection,
     });
   } catch (error) {
-    console.error('OCR import API error:', error);
-    return NextResponse.json({ error: 'Failed to process document upload' }, { status: 500 });
+    console.error('OCR API error:', error);
+    return NextResponse.json({ error: 'Failed to process document Gemini Vision OCR' }, { status: 500 });
   }
 }

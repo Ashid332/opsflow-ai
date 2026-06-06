@@ -11,10 +11,14 @@ import {
   Sparkles, 
   Eye, 
   ShieldCheck, 
-  ArrowRight,
   ArrowLeft,
-  ChevronRight,
-  FileSpreadsheet
+  Calendar,
+  Clock,
+  User,
+  Activity,
+  Cpu,
+  Hash,
+  Hammer
 } from 'lucide-react';
 
 interface ExtractedData {
@@ -42,10 +46,14 @@ export default function DocumentCenter() {
   
   // OCR Editable Fields
   const [inspectorName, setInspectorName] = useState('');
-  const [orderName, setOrderName] = useState('');
-  const [targetQuantity, setTargetQuantity] = useState(0);
-  const [machineName, setMachineName] = useState('');
+  const [date, setDate] = useState('');
   const [shiftName, setShiftName] = useState('Morning Shift');
+  const [employeeNumber, setEmployeeNumber] = useState('');
+  const [operationCode, setOperationCode] = useState('');
+  const [machineName, setMachineName] = useState('');
+  const [workOrderNumber, setWorkOrderNumber] = useState('');
+  const [targetQuantity, setTargetQuantity] = useState(0);
+  const [timeTaken, setTimeTaken] = useState('');
   const [comments, setComments] = useState('');
 
   // UI state
@@ -54,10 +62,10 @@ export default function DocumentCenter() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scanMessages = [
-    'Initializing OCR Document Scanner...',
-    'Performing AI Text Line Detection & Bounding-Box Alignments...',
-    'Extracting Entities (Batch Name, Machine ID, Quantity)...',
-    'Running Validation Rules Engine...'
+    'Initializing Gemini Vision API connection...',
+    'Performing OCR layout analysis & textual alignment...',
+    'Extracting Date, Shift, Employee, Operation Code, Machine, WO#, Quantity & Time...',
+    'Running plant-rules validation engine...'
   ];
 
   // Drag and drop handlers
@@ -103,18 +111,10 @@ export default function DocumentCenter() {
     setWorkflowState('scanning');
     setScanStep(0);
 
-    // Animate the OCR scanning steps
     const stepInterval = setInterval(() => {
-      setScanStep(prev => {
-        if (prev >= 3) {
-          clearInterval(stepInterval);
-          return 3;
-        }
-        return prev + 1;
-      });
+      setScanStep(prev => (prev >= 3 ? 3 : prev + 1));
     }, 900);
 
-    // Call API simultaneously
     const formData = new FormData();
     formData.append('file', uploadFile);
 
@@ -126,19 +126,28 @@ export default function DocumentCenter() {
 
       if (response.ok) {
         const data = await response.json();
-        // Delay transition slightly to finish animation feel
         setTimeout(() => {
           setExtractedData(data.inspection);
-          setOrderName(data.order.name);
-          setTargetQuantity(data.order.targetQuantity);
           
           try {
             const meta = JSON.parse(data.inspection.notes);
-            setMachineName(meta.machineName || 'Assembly Line A (CNC)');
+            setDate(meta.date || '');
             setShiftName(meta.shift || 'Morning Shift');
+            setEmployeeNumber(meta.employeeNumber || '');
+            setOperationCode(meta.operationCode || '');
+            setMachineName(meta.machineName || '');
+            setWorkOrderNumber(meta.workOrderNumber || '');
+            setTargetQuantity(meta.quantityProduced || 0);
+            setTimeTaken(meta.timeTaken || '');
           } catch (e) {
-            setMachineName('Assembly Line A (CNC)');
+            setDate('');
             setShiftName('Morning Shift');
+            setEmployeeNumber('');
+            setOperationCode('');
+            setMachineName('');
+            setWorkOrderNumber('');
+            setTargetQuantity(0);
+            setTimeTaken('');
           }
 
           setWorkflowState('review');
@@ -161,7 +170,7 @@ export default function DocumentCenter() {
   const handleSubmitReview = async (status: 'APPROVED' | 'REJECTED') => {
     if (!extractedData) return;
     if (!inspectorName.trim()) {
-      alert('Please enter your Inspector Signature before validation.');
+      alert('Please enter your Inspector Signature to commit release.');
       return;
     }
 
@@ -173,16 +182,20 @@ export default function DocumentCenter() {
         body: JSON.stringify({
           status,
           inspectorName,
-          orderName,
-          targetQuantity,
+          date,
+          shift: shiftName,
+          employeeNumber,
+          operationCode,
           machineName,
-          shiftName,
+          workOrderNumber,
+          targetQuantity,
+          timeTaken,
           comments,
         }),
       });
 
       if (response.ok) {
-        alert(`Document extraction successfully marked as ${status}.`);
+        alert(`Document verification successfully marked as ${status === 'APPROVED' ? 'SAVED' : 'DISCARDED'}.`);
         resetWorkspace();
       } else {
         const data = await response.json();
@@ -200,18 +213,31 @@ export default function DocumentCenter() {
     setFile(null);
     setExtractedData(null);
     setInspectorName('');
-    setOrderName('');
-    setTargetQuantity(0);
-    setMachineName('');
+    setDate('');
     setShiftName('Morning Shift');
+    setEmployeeNumber('');
+    setOperationCode('');
+    setMachineName('');
+    setWorkOrderNumber('');
+    setTargetQuantity(0);
+    setTimeTaken('');
     setComments('');
     setWorkflowState('upload');
   };
 
-  // Parsing metadata for rendering
+  // Parsing metadata for rendering confidence values
   let meta = {
     fileName: 'document.pdf',
-    confidence: { name: 1.0, targetQuantity: 1.0, machineName: 1.0, shift: 1.0 },
+    confidence: {
+      date: 1.0,
+      shift: 1.0,
+      employeeNumber: 1.0,
+      operationCode: 1.0,
+      machineName: 1.0,
+      workOrderNumber: 1.0,
+      quantityProduced: 1.0,
+      timeTaken: 1.0
+    },
     validationErrors: [] as string[],
     originalText: ''
   };
@@ -219,24 +245,55 @@ export default function DocumentCenter() {
   if (extractedData?.notes) {
     try {
       meta = JSON.parse(extractedData.notes);
-    } catch (e) {
-      // Use defaults
-    }
+    } catch (e) {}
   }
 
-  // Live client-side re-validation preview
+  // Live client-side re-validation
   const liveErrors: string[] = [];
   if (targetQuantity > 1000) {
-    liveErrors.push(`Blocker: Target quantity (${targetQuantity}) exceeds standard machine batch capacity of 1000 units.`);
+    liveErrors.push(`Blocker: Extracted quantity (${targetQuantity}) exceeds standard machine capacity of 1000 units.`);
   }
   if (!machineName.trim()) {
     liveErrors.push(`Blocker: Machine assignment field is empty.`);
   }
-  if (!/#\d+/.test(orderName)) {
-    liveErrors.push(`Warning: Order name lacks a specific tracking identifier (e.g. #ID).`);
+  if (!employeeNumber.trim()) {
+    liveErrors.push(`Warning: Missing Employee Number.`);
+  }
+  if (!workOrderNumber.trim()) {
+    liveErrors.push(`Warning: Work Order Number is empty.`);
   }
 
+  // Low confidence flags warning (threshold 75%)
+  const confidenceItems = [
+    { name: 'Date', val: meta.confidence.date },
+    { name: 'Shift', val: meta.confidence.shift },
+    { name: 'Employee Number', val: meta.confidence.employeeNumber },
+    { name: 'Operation Code', val: meta.confidence.operationCode },
+    { name: 'Machine Number', val: meta.confidence.machineName },
+    { name: 'Work Order Number', val: meta.confidence.workOrderNumber },
+    { name: 'Quantity Produced', val: meta.confidence.quantityProduced },
+    { name: 'Time Taken', val: meta.confidence.timeTaken },
+  ];
+
+  confidenceItems.forEach(item => {
+    if (item.val !== undefined && item.val < 0.75) {
+      liveErrors.push(`Warning: Low OCR reading confidence (${Math.round(item.val * 100)}%) on '${item.name}'.`);
+    }
+  });
+
   const hasBlockers = liveErrors.some(e => e.startsWith('Blocker:'));
+
+  const getConfidenceColor = (score: number) => {
+    if (score >= 0.85) return 'bg-emerald-500';
+    if (score >= 0.70) return 'bg-amber-500';
+    return 'bg-rose-500';
+  };
+
+  const getConfidenceTextClass = (score: number) => {
+    if (score >= 0.85) return 'text-emerald-400';
+    if (score >= 0.70) return 'text-amber-400';
+    return 'text-rose-400';
+  };
 
   return (
     <div className="space-y-6">
@@ -246,10 +303,10 @@ export default function DocumentCenter() {
           <div className="text-center space-y-2 mb-6">
             <h2 className="text-2xl font-extrabold text-white tracking-tight flex items-center justify-center gap-2">
               <Sparkles className="text-blue-500 animate-pulse" />
-              Document Processing Workspace
+              AI Document Processing Workspace
             </h2>
             <p className="text-xs text-gray-400">
-              Upload manufacturing run sheets, logs, or CAD order forms to automatically extract job configurations.
+              Upload manufacturing run sheets, logs, or CAD order forms to automatically extract job configurations using Gemini Vision OCR.
             </p>
           </div>
 
@@ -275,7 +332,7 @@ export default function DocumentCenter() {
             <div className="p-4 rounded-full bg-blue-950/40 text-blue-400 mb-4 border border-blue-900/40">
               <UploadCloud size={32} className="animate-bounce" style={{ animationDuration: '3s' }} />
             </div>
-            <h4 className="text-sm font-bold text-gray-200">Drag & Drop file to start AI Extraction</h4>
+            <h4 className="text-sm font-bold text-gray-200">Drag & Drop file to start AI Vision Extraction</h4>
             <p className="text-xs text-gray-400 mt-1">Supports PDF work instructions, CSV/JSON schedules, or images</p>
             <button className="mt-5 py-2 px-5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-lg shadow-blue-600/10 transition-colors">
               Browse Local Files
@@ -300,9 +357,8 @@ export default function DocumentCenter() {
           </div>
 
           <div className="space-y-3">
-            <h3 className="text-sm font-bold text-white uppercase tracking-widest font-mono">Running OCR Pipeline</h3>
+            <h3 className="text-sm font-bold text-white uppercase tracking-widest font-mono">Running Gemini Vision OCR Pipeline</h3>
             
-            {/* Step animation list */}
             <div className="space-y-1.5 text-left bg-gray-950/80 border border-gray-850 p-4 rounded-lg font-mono text-[10.5px]">
               {scanMessages.map((msg, idx) => (
                 <div key={idx} className="flex items-center gap-2">
@@ -326,18 +382,17 @@ export default function DocumentCenter() {
       {/* 3. Split-Screen Review & Validation Workspace */}
       {workflowState === 'review' && extractedData && (
         <div className="space-y-4">
-          {/* Workspace Controls Header */}
           <div className="flex items-center justify-between border-b border-gray-800 pb-3">
             <button
               onClick={resetWorkspace}
-              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors back-btn"
             >
               <ArrowLeft size={14} />
               Back to Uploader
             </button>
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-mono text-gray-500">File: {file?.name || 'document.pdf'}</span>
-              <span className="h-2 w-2 rounded-full bg-blue-500" />
+              <span className="h-2 w-2 rounded-full bg-blue-500 animate-ping" />
             </div>
           </div>
 
@@ -350,51 +405,66 @@ export default function DocumentCenter() {
               </h3>
 
               {/* Rendered Mock Paper Invoice Sheet */}
-              <div className="relative border border-amber-900/30 bg-[#0c101b] rounded-lg p-6 font-mono text-[9px] text-gray-400 leading-normal space-y-6 min-h-[460px] select-none shadow-inner">
-                {/* Visual Bounding Box Highlighting Overlay */}
-                <div className="border-b border-gray-900 pb-4 flex justify-between items-start">
+              <div className="relative border border-amber-900/30 bg-[#0c101b] rounded-lg p-5 font-mono text-[8.5px] text-gray-400 leading-normal space-y-4 min-h-[580px] select-none shadow-inner">
+                <div className="border-b border-gray-900 pb-3 flex justify-between items-start">
                   <div>
-                    <span className="text-[10px] font-bold text-white block">WORK ORDER SHEET #509</span>
-                    <span className="text-gray-600">FACTORY LOGISTICS DEPT</span>
+                    <span className="text-[9.5px] font-bold text-white block">SMART PLANT OPERATIONS RUN LOG</span>
+                    <span className="text-gray-650 text-[7.5px]">AUTOMATED OCR METADATA RECOVERY</span>
                   </div>
-                  <span className="text-gray-700">PAGE 1/1</span>
+                  <span className="text-gray-600">PAGE 1/1</span>
                 </div>
 
-                <div className="space-y-4">
-                  {/* Extracted Name OCR box */}
-                  <div className="relative p-2 border border-blue-900/30 bg-blue-950/20 rounded">
-                    <span className="absolute -top-2 left-2 px-1 bg-[#0c101b] text-blue-500 font-sans text-[7px] font-bold">OCR DETECTED: BATCH NAME</span>
-                    <div className="text-[10px] font-semibold text-white tracking-wide">{orderName || 'Auto-Chassis Batch #512'}</div>
-                    <span className="absolute right-2 top-2 text-[8px] font-sans font-bold text-blue-400">{Math.round(meta.confidence.name * 100)}% Match</span>
+                <div className="space-y-3 pt-2">
+                  {/* Bounding box for WO */}
+                  <div className="relative p-1.5 border border-blue-900/30 bg-blue-950/20 rounded">
+                    <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-blue-500 font-sans text-[6px] font-bold">1. WORK ORDER NUMBER</span>
+                    <div className="text-[9px] font-semibold text-white tracking-wide">{workOrderNumber || 'WO-5121'}</div>
                   </div>
 
-                  {/* Extracted Quantity OCR box */}
-                  <div className="relative p-2 border border-emerald-900/30 bg-emerald-950/20 rounded">
-                    <span className="absolute -top-2 left-2 px-1 bg-[#0c101b] text-emerald-500 font-sans text-[7px] font-bold">OCR DETECTED: QUANTITY</span>
-                    <div className="text-[10px] font-semibold text-white tracking-wide font-mono">{targetQuantity} units</div>
-                    <span className="absolute right-2 top-2 text-[8px] font-sans font-bold text-emerald-400">{Math.round(meta.confidence.targetQuantity * 100)}% Match</span>
-                  </div>
-
-                  {/* Extracted Machine and Shift OCR boxes */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="relative p-2 border border-purple-900/30 bg-purple-950/20 rounded">
-                      <span className="absolute -top-2 left-2 px-1 bg-[#0c101b] text-purple-500 font-sans text-[7px] font-bold">OCR DETECTED: MACHINE</span>
-                      <div className="text-[9.5px] font-semibold text-white truncate">{machineName || 'Assembly Line A'}</div>
-                      <span className="absolute right-1 bottom-1 text-[7px] font-sans text-purple-400">{Math.round(meta.confidence.machineName * 100)}%</span>
+                  {/* Bounding box for Qty & Time */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="relative p-1.5 border border-emerald-900/30 bg-emerald-950/20 rounded">
+                      <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-emerald-500 font-sans text-[6px] font-bold">2. QUANTITY</span>
+                      <div className="text-[9px] font-semibold text-white">{targetQuantity} units</div>
                     </div>
+                    <div className="relative p-1.5 border border-indigo-900/30 bg-indigo-950/20 rounded">
+                      <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-indigo-500 font-sans text-[6px] font-bold">3. TIME TAKEN</span>
+                      <div className="text-[9px] font-semibold text-white">{timeTaken || '4 hours'}</div>
+                    </div>
+                  </div>
 
-                    <div className="relative p-2 border border-indigo-900/30 bg-indigo-950/20 rounded">
-                      <span className="absolute -top-2 left-2 px-1 bg-[#0c101b] text-indigo-500 font-sans text-[7px] font-bold">OCR DETECTED: SHIFT</span>
-                      <div className="text-[9.5px] font-semibold text-white truncate">{shiftName}</div>
-                      <span className="absolute right-1 bottom-1 text-[7px] font-sans text-indigo-400">{Math.round(meta.confidence.shift * 100)}%</span>
+                  {/* Bounding box for Machine & Operator */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="relative p-1.5 border border-purple-900/30 bg-purple-950/20 rounded">
+                      <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-purple-500 font-sans text-[6px] font-bold">4. MACHINE</span>
+                      <div className="text-[9px] font-semibold text-white truncate">{machineName || 'Welding Robot B'}</div>
+                    </div>
+                    <div className="relative p-1.5 border border-pink-900/30 bg-pink-950/20 rounded">
+                      <span className="absolute -top-1.5 left-1.5 px-0.5 bg-[#0c101b] text-pink-500 font-sans text-[6px] font-bold">5. OPERATOR ID</span>
+                      <div className="text-[9px] font-semibold text-white truncate">{employeeNumber || 'EMP-712'}</div>
+                    </div>
+                  </div>
+
+                  {/* Bounding box for Date, Shift, OpCode */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="relative p-1.5 border border-amber-900/30 bg-amber-950/20 rounded">
+                      <span className="absolute -top-1.5 left-1 px-0.5 bg-[#0c101b] text-amber-500 font-sans text-[6.5px] font-bold">6. DATE</span>
+                      <div className="text-[8.5px] font-semibold text-white truncate">{date}</div>
+                    </div>
+                    <div className="relative p-1.5 border border-teal-900/30 bg-teal-950/20 rounded">
+                      <span className="absolute -top-1.5 left-1 px-0.5 bg-[#0c101b] text-teal-500 font-sans text-[6.5px] font-bold">7. SHIFT</span>
+                      <div className="text-[8.5px] font-semibold text-white truncate">{shiftName}</div>
+                    </div>
+                    <div className="relative p-1.5 border border-gray-900 bg-gray-950/20 rounded">
+                      <span className="absolute -top-1.5 left-1 px-0.5 bg-[#0c101b] text-gray-400 font-sans text-[6.5px] font-bold">8. OP CODE</span>
+                      <div className="text-[8.5px] font-semibold text-white truncate">{operationCode}</div>
                     </div>
                   </div>
                 </div>
 
-                {/* Styled raw text field */}
-                <div className="border-t border-gray-900 pt-4 space-y-1 text-gray-650 text-[8.5px]">
-                  <div>[OCR RAW DATA DUMP]</div>
-                  <div className="line-clamp-6 leading-relaxed font-sans">{meta.originalText}</div>
+                <div className="border-t border-gray-900 pt-4 space-y-1 text-gray-650 text-[8px]">
+                  <div>[RAW GEMINI TEXT DE-SERIALIZATION]</div>
+                  <div className="line-clamp-10 leading-relaxed font-sans">{meta.originalText}</div>
                 </div>
               </div>
             </div>
@@ -402,117 +472,203 @@ export default function DocumentCenter() {
             {/* Right Panel: Human Verification Form & Validation (3 Columns) */}
             <div className="lg:col-span-3 space-y-5">
               
-              {/* Form panel */}
               <div className="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm space-y-4">
                 <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
                   <ShieldCheck size={14} className="text-blue-500" />
-                  AI Extraction Review Panel
+                  Gemini OCR Human Verification Panel
                 </h3>
 
-                <div className="space-y-3.5">
-                  {/* Order/Batch Name Editable Field */}
+                {/* 8 Editable Fields Structured Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Field 1: Date */}
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
-                      <span>Batch/Order Name *</span>
-                      <span className={`font-mono ${meta.confidence.name < 0.85 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                        OCR Confidence: {Math.round(meta.confidence.name * 100)}%
+                      <span className="flex items-center gap-1"><Calendar size={11} />Date</span>
+                      <span className={`font-mono text-[9px] ${getConfidenceTextClass(meta.confidence.date)}`}>
+                        {Math.round(meta.confidence.date * 100)}%
                       </span>
                     </div>
                     <input
                       type="text"
-                      value={orderName}
-                      onChange={(e) => setOrderName(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg bg-gray-950 border border-gray-850 hover:border-gray-800 focus:border-blue-500 text-xs text-white focus:outline-none transition-colors"
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded bg-gray-950 border border-gray-850 hover:border-gray-800 text-xs text-white focus:outline-none"
                     />
-                    {/* Confidence Meter */}
                     <div className="w-full h-1 bg-gray-900 rounded-full overflow-hidden">
-                      <div className={`h-full ${meta.confidence.name < 0.85 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${meta.confidence.name * 100}%` }} />
+                      <div className={`h-full ${getConfidenceColor(meta.confidence.date)}`} style={{ width: `${meta.confidence.date * 100}%` }} />
                     </div>
                   </div>
 
-                  {/* Quantity Editable Field */}
+                  {/* Field 2: Shift */}
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
-                      <span>Target Quantity *</span>
-                      <span className={`font-mono ${meta.confidence.targetQuantity < 0.80 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                        OCR Confidence: {Math.round(meta.confidence.targetQuantity * 100)}%
+                      <span className="flex items-center gap-1"><Clock size={11} />Shift</span>
+                      <span className={`font-mono text-[9px] ${getConfidenceTextClass(meta.confidence.shift)}`}>
+                        {Math.round(meta.confidence.shift * 100)}%
+                      </span>
+                    </div>
+                    <select
+                      value={shiftName}
+                      onChange={(e) => setShiftName(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded bg-gray-950 border border-gray-850 hover:border-gray-800 text-xs text-white focus:outline-none"
+                    >
+                      <option value="Morning Shift">Morning Shift</option>
+                      <option value="Afternoon Shift">Afternoon Shift</option>
+                      <option value="Night Shift">Night Shift</option>
+                    </select>
+                    <div className="w-full h-1 bg-gray-900 rounded-full overflow-hidden">
+                      <div className={`h-full ${getConfidenceColor(meta.confidence.shift)}`} style={{ width: `${meta.confidence.shift * 100}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Field 3: Employee Number */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
+                      <span className="flex items-center gap-1"><User size={11} />Employee No</span>
+                      <span className={`font-mono text-[9px] ${getConfidenceTextClass(meta.confidence.employeeNumber)}`}>
+                        {Math.round(meta.confidence.employeeNumber * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      value={employeeNumber}
+                      onChange={(e) => setEmployeeNumber(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded bg-gray-950 border border-gray-850 hover:border-gray-800 text-xs text-white focus:outline-none"
+                    />
+                    <div className="w-full h-1 bg-gray-900 rounded-full overflow-hidden">
+                      <div className={`h-full ${getConfidenceColor(meta.confidence.employeeNumber)}`} style={{ width: `${meta.confidence.employeeNumber * 100}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Field 4: Operation Code */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
+                      <span className="flex items-center gap-1"><Activity size={11} />Operation Code</span>
+                      <span className={`font-mono text-[9px] ${getConfidenceTextClass(meta.confidence.operationCode)}`}>
+                        {Math.round(meta.confidence.operationCode * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      value={operationCode}
+                      onChange={(e) => setOperationCode(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded bg-gray-950 border border-gray-850 hover:border-gray-800 text-xs text-white focus:outline-none"
+                    />
+                    <div className="w-full h-1 bg-gray-900 rounded-full overflow-hidden">
+                      <div className={`h-full ${getConfidenceColor(meta.confidence.operationCode)}`} style={{ width: `${meta.confidence.operationCode * 100}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Field 5: Machine Number */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
+                      <span className="flex items-center gap-1"><Cpu size={11} />Machine Target</span>
+                      <span className={`font-mono text-[9px] ${getConfidenceTextClass(meta.confidence.machineName)}`}>
+                        {Math.round(meta.confidence.machineName * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      value={machineName}
+                      onChange={(e) => setMachineName(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded bg-gray-950 border border-gray-850 hover:border-gray-800 text-xs text-white focus:outline-none"
+                    />
+                    <div className="w-full h-1 bg-gray-900 rounded-full overflow-hidden">
+                      <div className={`h-full ${getConfidenceColor(meta.confidence.machineName)}`} style={{ width: `${meta.confidence.machineName * 100}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Field 6: Work Order Number */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
+                      <span className="flex items-center gap-1"><Hash size={11} />Work Order No</span>
+                      <span className={`font-mono text-[9px] ${getConfidenceTextClass(meta.confidence.workOrderNumber)}`}>
+                        {Math.round(meta.confidence.workOrderNumber * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      value={workOrderNumber}
+                      onChange={(e) => setWorkOrderNumber(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded bg-gray-950 border border-gray-850 hover:border-gray-800 text-xs text-white focus:outline-none"
+                    />
+                    <div className="w-full h-1 bg-gray-900 rounded-full overflow-hidden">
+                      <div className={`h-full ${getConfidenceColor(meta.confidence.workOrderNumber)}`} style={{ width: `${meta.confidence.workOrderNumber * 100}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Field 7: Quantity Produced */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
+                      <span className="flex items-center gap-1"><Hammer size={11} />Qty Produced</span>
+                      <span className={`font-mono text-[9px] ${getConfidenceTextClass(meta.confidence.quantityProduced)}`}>
+                        {Math.round(meta.confidence.quantityProduced * 100)}%
                       </span>
                     </div>
                     <input
                       type="number"
                       value={targetQuantity}
                       onChange={(e) => setTargetQuantity(parseInt(e.target.value, 10) || 0)}
-                      className="w-full px-3 py-2 rounded-lg bg-gray-950 border border-gray-850 hover:border-gray-800 focus:border-blue-500 text-xs text-white focus:outline-none transition-colors"
+                      className="w-full px-2.5 py-1.5 rounded bg-gray-950 border border-gray-850 hover:border-gray-800 text-xs text-white focus:outline-none"
                     />
                     <div className="w-full h-1 bg-gray-900 rounded-full overflow-hidden">
-                      <div className={`h-full ${meta.confidence.targetQuantity < 0.80 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${meta.confidence.targetQuantity * 100}%` }} />
+                      <div className={`h-full ${getConfidenceColor(meta.confidence.quantityProduced)}`} style={{ width: `${meta.confidence.quantityProduced * 100}%` }} />
                     </div>
                   </div>
 
-                  {/* Machine & Shift Inputs */}
-                  <div className="grid grid-cols-2 gap-4">
+                  {/* Field 8: Time Taken */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
+                      <span className="flex items-center gap-1"><Clock size={11} />Time Taken</span>
+                      <span className={`font-mono text-[9px] ${getConfidenceTextClass(meta.confidence.timeTaken)}`}>
+                        {Math.round(meta.confidence.timeTaken * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      value={timeTaken}
+                      onChange={(e) => setTimeTaken(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded bg-gray-950 border border-gray-850 hover:border-gray-800 text-xs text-white focus:outline-none"
+                    />
+                    <div className="w-full h-1 bg-gray-900 rounded-full overflow-hidden">
+                      <div className={`h-full ${getConfidenceColor(meta.confidence.timeTaken)}`} style={{ width: `${meta.confidence.timeTaken * 100}%` }} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Supervisor Verification signature & Notes */}
+                <div className="space-y-3 pt-3 border-t border-gray-850/80">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
-                        <span>Machine Assignment *</span>
-                        <span className="font-mono text-[9px] text-purple-400">{Math.round(meta.confidence.machineName * 100)}%</span>
-                      </div>
+                      <label className="block text-[10px] uppercase font-semibold text-gray-400">
+                        QA Supervisor Signature *
+                      </label>
                       <input
                         type="text"
-                        value={machineName}
-                        onChange={(e) => setMachineName(e.target.value)}
-                        placeholder="e.g. Welding Robot B"
-                        className="w-full px-3 py-2 rounded-lg bg-gray-950 border border-gray-850 hover:border-gray-800 focus:border-blue-500 text-xs text-white focus:outline-none transition-colors"
+                        placeholder="Type signature name"
+                        value={inspectorName}
+                        onChange={(e) => setInspectorName(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded bg-gray-950 border border-blue-900/40 text-xs text-white focus:outline-none"
                       />
                     </div>
 
                     <div className="space-y-1.5">
-                      <div className="flex justify-between items-center text-[10px] uppercase font-semibold text-gray-400">
-                        <span>Target Shift *</span>
-                        <span className="font-mono text-[9px] text-indigo-400">{Math.round(meta.confidence.shift * 100)}%</span>
-                      </div>
-                      <select
-                        value={shiftName}
-                        onChange={(e) => setShiftName(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg bg-gray-950 border border-gray-850 hover:border-gray-800 focus:border-blue-500 text-xs text-white focus:outline-none transition-colors"
-                      >
-                        <option value="Morning Shift">Morning Shift</option>
-                        <option value="Afternoon Shift">Afternoon Shift</option>
-                        <option value="Night Shift">Night Shift</option>
-                      </select>
+                      <label className="block text-[10px] uppercase font-semibold text-gray-400">
+                        Release Comments / Notes
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Cleared OCR errors manually"
+                        value={comments}
+                        onChange={(e) => setComments(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded bg-gray-950 border border-gray-850 text-xs text-white focus:outline-none"
+                      />
                     </div>
-                  </div>
-
-                  {/* Inspector signature */}
-                  <div className="space-y-1.5 pt-2 border-t border-gray-800/80">
-                    <label className="block text-[10px] uppercase font-semibold text-gray-400">
-                      Inspector Verification Signature *
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Type your name to release order"
-                      value={inspectorName}
-                      onChange={(e) => setInspectorName(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg bg-gray-950 border border-blue-900/40 hover:border-blue-800/60 focus:border-blue-500 text-xs text-white focus:outline-none transition-colors"
-                    />
-                  </div>
-
-                  {/* Comments */}
-                  <div className="space-y-1.5">
-                    <label className="block text-[10px] uppercase font-semibold text-gray-400">
-                      QA Release Comments / Notes
-                    </label>
-                    <textarea
-                      placeholder="Write any comments regarding extraction corrections or releases."
-                      value={comments}
-                      onChange={(e) => setComments(e.target.value)}
-                      rows={2}
-                      className="w-full px-3 py-2 rounded-lg bg-gray-950 border border-gray-850 hover:border-gray-800 focus:border-blue-500 text-xs text-white focus:outline-none transition-colors resize-none"
-                    />
                   </div>
                 </div>
               </div>
 
-              {/* Validation Warning Panel */}
+              {/* Rules Validation Panel */}
               <div className="bg-[#111827] border border-gray-800 rounded-xl p-5 shadow-sm space-y-3">
                 <div className="flex justify-between items-center border-b border-gray-800 pb-2">
                   <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
@@ -522,7 +678,7 @@ export default function DocumentCenter() {
                   <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
                     liveErrors.length > 0
                       ? hasBlockers 
-                        ? 'bg-rose-950 text-rose-400' 
+                        ? 'bg-rose-950 text-rose-400 animate-pulse' 
                         : 'bg-amber-950 text-amber-400'
                       : 'bg-emerald-950 text-emerald-400'
                   }`}>
@@ -530,11 +686,11 @@ export default function DocumentCenter() {
                   </span>
                 </div>
 
-                <div className="space-y-2.5 max-h-[140px] overflow-y-auto pr-1">
+                <div className="space-y-2.5 max-h-[130px] overflow-y-auto pr-1">
                   {liveErrors.length === 0 ? (
                     <div className="text-xs text-emerald-400 flex items-center gap-2">
                       <CheckCircle2 size={13} />
-                      No blockers or warnings flagged. Ready to commit.
+                      No blockers or warnings flagged. Ready to release.
                     </div>
                   ) : (
                     liveErrors.map((err, idx) => {
@@ -544,8 +700,8 @@ export default function DocumentCenter() {
                           key={idx} 
                           className={`flex items-start gap-2 p-2 rounded-lg text-xs leading-normal ${
                             isBlocker 
-                              ? 'bg-rose-950/20 border border-rose-900/30 text-rose-400' 
-                              : 'bg-amber-950/20 border border-amber-900/30 text-amber-400'
+                              ? 'bg-rose-950/20 border border-rose-900/30 text-rose-455 text-rose-400' 
+                              : 'bg-amber-950/20 border border-amber-900/30 text-amber-455 text-amber-400'
                           }`}
                         >
                           <AlertCircle size={13} className="shrink-0 mt-0.5" />
@@ -557,12 +713,12 @@ export default function DocumentCenter() {
                 </div>
               </div>
 
-              {/* Workspace Action Buttons */}
+              {/* Action Buttons */}
               <div className="grid grid-cols-2 gap-4">
                 <button
                   onClick={() => handleSubmitReview('REJECTED')}
                   disabled={submitting}
-                  className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-rose-950/40 border border-rose-900/60 hover:bg-rose-900/50 text-rose-400 disabled:opacity-40 text-xs font-bold active:scale-98 transition-all"
+                  className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-rose-950/40 border border-rose-900/60 hover:bg-rose-900/50 text-rose-400 disabled:opacity-40 text-xs font-bold active:scale-98 transition-all reject-btn"
                 >
                   <XCircle size={15} />
                   Flag & Reject Document
@@ -571,8 +727,8 @@ export default function DocumentCenter() {
                 <button
                   onClick={() => handleSubmitReview('APPROVED')}
                   disabled={submitting || hasBlockers}
-                  className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/40 disabled:text-gray-400 disabled:border-transparent text-white text-xs font-bold shadow-md shadow-blue-600/10 active:scale-98 transition-all"
-                  title={hasBlockers ? 'Resolve all Blocker errors to release' : 'Save and Release production batch'}
+                  className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/40 disabled:text-gray-400 text-white text-xs font-bold shadow-md shadow-blue-600/10 active:scale-98 transition-all release-btn"
+                  title={hasBlockers ? 'Resolve all Blocker errors to release' : 'Verify and Save production order'}
                 >
                   {submitting ? (
                     <>
