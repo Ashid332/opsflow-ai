@@ -43,6 +43,7 @@ export default function ReviewQueuePage() {
   const [activeTab, setActiveTab] = useState<'pending' | 'completed'>('pending');
   const [expandedPreviewId, setExpandedPreviewId] = useState<string | null>(null);
   const [previewTabs, setPreviewTabs] = useState<Record<string, 'document' | 'ocr'>>({});
+  const [previewFilesAvailability, setPreviewFilesAvailability] = useState<Record<string, boolean>>({});
 
   // Form states mapped by inspection ID
   const [formStates, setFormStates] = useState<Record<string, {
@@ -115,6 +116,30 @@ export default function ReviewQueuePage() {
   useEffect(() => {
     fetchInspections();
   }, [fetchInspections]);
+
+  useEffect(() => {
+    if (expandedPreviewId) {
+      const ins = inspections.find(i => i.id === expandedPreviewId);
+      if (ins && ins.notes) {
+        try {
+          const meta = JSON.parse(ins.notes);
+          if (meta.fileUrl) {
+            fetch(meta.fileUrl, { method: 'HEAD' })
+              .then(res => {
+                setPreviewFilesAvailability(prev => ({ ...prev, [expandedPreviewId]: res.ok }));
+              })
+              .catch(() => {
+                setPreviewFilesAvailability(prev => ({ ...prev, [expandedPreviewId]: false }));
+              });
+          } else {
+            setPreviewFilesAvailability(prev => ({ ...prev, [expandedPreviewId]: false }));
+          }
+        } catch (e) {
+          setPreviewFilesAvailability(prev => ({ ...prev, [expandedPreviewId]: false }));
+        }
+      }
+    }
+  }, [expandedPreviewId, inspections]);
 
   const handleFormChange = (id: string, field: string, value: any) => {
     setFormStates(prev => ({
@@ -404,7 +429,20 @@ export default function ReviewQueuePage() {
 
                           {meta.fileUrl && (previewTabs[ins.id] || 'document') === 'document' ? (
                             <div className="flex-1 flex flex-col justify-center items-center bg-[#0c101b] rounded-lg p-2 overflow-hidden min-h-[380px]">
-                              {meta.fileType?.includes('pdf') ? (
+                              {previewFilesAvailability[ins.id] === false ? (
+                                <div className="flex flex-col justify-center items-center p-5 text-center min-h-[350px] space-y-3">
+                                  <div className="p-3 rounded-full bg-amber-950/40 text-amber-500 border border-amber-900/40">
+                                    <AlertCircle size={24} className="animate-pulse" />
+                                  </div>
+                                  <h4 className="text-[10px] font-bold text-gray-200 uppercase">Preview File Unavailable</h4>
+                                  <p className="text-[9px] text-gray-500 max-w-[200px] leading-relaxed font-sans">
+                                    The original scanned PDF or image is no longer available in the ephemeral Vercel serverless storage.
+                                  </p>
+                                  <span className="px-2 py-0.5 rounded text-[8px] bg-blue-950 text-blue-400 font-sans border border-blue-900/50">
+                                    Structured OCR data is preserved
+                                  </span>
+                                </div>
+                              ) : meta.fileType?.includes('pdf') ? (
                                 <iframe 
                                   src={meta.fileUrl} 
                                   className="w-full h-full min-h-[380px] border-none rounded bg-[#0c101b]"
@@ -415,6 +453,9 @@ export default function ReviewQueuePage() {
                                   src={meta.fileUrl} 
                                   alt="Scanned Document Preview" 
                                   className="max-w-full max-h-[400px] object-contain rounded"
+                                  onError={() => {
+                                    setPreviewFilesAvailability(prev => ({ ...prev, [ins.id]: false }));
+                                  }}
                                 />
                               )}
                             </div>
