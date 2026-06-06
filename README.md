@@ -1,5 +1,7 @@
 # OpsFlow AI: Manufacturing Document Processing & Analytics Engine
 
+### 🌐 Live Production URL: [https://ai-manufacturing-workflow.vercel.app/](https://ai-manufacturing-workflow.vercel.app/)
+
 OpsFlow AI is a modern manufacturing intelligence application designed to automate, validate, and verify plant production logs. Using **Google Gemini 2.5 Flash Vision OCR**, the system ingests scanned physical sheets, extracts structured parameters, runs automated validation checks, and exposes an inspection verification queue for supervisor release.
 
 ---
