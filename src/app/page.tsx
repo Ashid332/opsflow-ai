@@ -60,6 +60,7 @@ export default function DocumentCenter() {
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [previewTab, setPreviewTab] = useState<'document' | 'ocr'>('document');
+  const [previewFileAvailable, setPreviewFileAvailable] = useState<boolean | 'checking'>(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scanMessages = [
@@ -140,6 +141,15 @@ export default function DocumentCenter() {
             setWorkOrderNumber(meta.workOrderNumber || '');
             setTargetQuantity(meta.quantityProduced || 0);
             setTimeTaken(meta.timeTaken || '');
+
+            if (meta.fileUrl) {
+              setPreviewFileAvailable('checking');
+              fetch(meta.fileUrl, { method: 'HEAD' })
+                .then(res => setPreviewFileAvailable(res.ok))
+                .catch(() => setPreviewFileAvailable(false));
+            } else {
+              setPreviewFileAvailable(false);
+            }
           } catch (e) {
             setDate('');
             setShiftName('Morning Shift');
@@ -149,6 +159,7 @@ export default function DocumentCenter() {
             setWorkOrderNumber('');
             setTargetQuantity(0);
             setTimeTaken('');
+            setPreviewFileAvailable(false);
           }
 
           setWorkflowState('review');
@@ -223,6 +234,7 @@ export default function DocumentCenter() {
     setTargetQuantity(0);
     setTimeTaken('');
     setComments('');
+    setPreviewFileAvailable(true);
     setWorkflowState('upload');
   };
 
@@ -442,7 +454,25 @@ export default function DocumentCenter() {
 
               {meta.fileUrl && previewTab === 'document' ? (
                 <div className="flex-1 flex flex-col justify-center items-center bg-[#0c101b] border border-amber-900/10 rounded-lg p-2 overflow-hidden shadow-inner min-h-[500px]">
-                  {meta.fileType?.includes('pdf') ? (
+                  {previewFileAvailable === 'checking' ? (
+                    <div className="flex flex-col justify-center items-center min-h-[450px] space-y-2">
+                      <Loader2 className="h-6 w-6 text-blue-500 animate-spin" />
+                      <span className="text-[10px] text-gray-500">Checking preview availability...</span>
+                    </div>
+                  ) : previewFileAvailable === false ? (
+                    <div className="flex flex-col justify-center items-center p-5 text-center min-h-[450px] space-y-4">
+                      <div className="p-4 rounded-full bg-amber-950/40 text-amber-500 border border-amber-900/40">
+                        <AlertCircle size={28} className="animate-pulse" />
+                      </div>
+                      <h4 className="text-xs font-bold text-gray-200 uppercase tracking-wider">Preview File Unavailable</h4>
+                      <p className="text-xs text-gray-500 max-w-[240px] leading-relaxed font-sans">
+                        The original scanned PDF or image is no longer available in the ephemeral Vercel serverless storage.
+                      </p>
+                      <span className="px-2.5 py-0.5 rounded text-[9px] bg-blue-950 text-blue-400 font-sans border border-blue-900/50">
+                        Structured OCR data is preserved
+                      </span>
+                    </div>
+                  ) : meta.fileType?.includes('pdf') ? (
                     <iframe 
                       src={meta.fileUrl} 
                       className="w-full h-full min-h-[500px] border-none rounded bg-[#0c101b]"
@@ -453,6 +483,7 @@ export default function DocumentCenter() {
                       src={meta.fileUrl} 
                       alt="Uploaded Scanned Document" 
                       className="max-w-full max-h-[500px] object-contain rounded"
+                      onError={() => setPreviewFileAvailable(false)}
                     />
                   )}
                 </div>

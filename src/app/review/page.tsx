@@ -43,7 +43,7 @@ export default function ReviewQueuePage() {
   const [activeTab, setActiveTab] = useState<'pending' | 'completed'>('pending');
   const [expandedPreviewId, setExpandedPreviewId] = useState<string | null>(null);
   const [previewTabs, setPreviewTabs] = useState<Record<string, 'document' | 'ocr'>>({});
-  const [previewFilesAvailability, setPreviewFilesAvailability] = useState<Record<string, boolean>>({});
+  const [previewFilesAvailability, setPreviewFilesAvailability] = useState<Record<string, boolean | 'checking'>>({});
 
   // Form states mapped by inspection ID
   const [formStates, setFormStates] = useState<Record<string, {
@@ -124,6 +124,7 @@ export default function ReviewQueuePage() {
         try {
           const meta = JSON.parse(ins.notes);
           if (meta.fileUrl) {
+            setPreviewFilesAvailability(prev => ({ ...prev, [expandedPreviewId]: 'checking' }));
             fetch(meta.fileUrl, { method: 'HEAD' })
               .then(res => {
                 setPreviewFilesAvailability(prev => ({ ...prev, [expandedPreviewId]: res.ok }));
@@ -429,7 +430,12 @@ export default function ReviewQueuePage() {
 
                           {meta.fileUrl && (previewTabs[ins.id] || 'document') === 'document' ? (
                             <div className="flex-1 flex flex-col justify-center items-center bg-[#0c101b] rounded-lg p-2 overflow-hidden min-h-[380px]">
-                              {previewFilesAvailability[ins.id] === false ? (
+                              {previewFilesAvailability[ins.id] === 'checking' ? (
+                                <div className="flex flex-col justify-center items-center min-h-[350px] space-y-2">
+                                  <RefreshCw className="h-5 w-5 text-blue-500 animate-spin" />
+                                  <span className="text-[9px] text-gray-500">Checking preview availability...</span>
+                                </div>
+                              ) : previewFilesAvailability[ins.id] === false ? (
                                 <div className="flex flex-col justify-center items-center p-5 text-center min-h-[350px] space-y-3">
                                   <div className="p-3 rounded-full bg-amber-950/40 text-amber-500 border border-amber-900/40">
                                     <AlertCircle size={24} className="animate-pulse" />

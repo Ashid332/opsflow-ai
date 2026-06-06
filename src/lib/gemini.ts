@@ -80,9 +80,29 @@ export async function extractFieldsFromDocument(
 
   const prompt = `
     You are an expert AI Vision OCR parser in a manufacturing smart plant.
-    Analyze the attached document page (work order sheet, inspection report, or production run sheet).
-    Extract the requested fields and return them strictly in the specified JSON structure.
-    Be precise. For each field, estimate an OCR reading confidence score (0.0 to 1.0) based on readability, alignment, and clarity.
+    Analyze the attached document page (which could be a work order sheet, inspection report, production run sheet, log table, or scan form).
+    
+    Instructions for Extraction:
+    1. Read the sheet header, labels, and tabular entries very carefully. Map fields by looking at the nearest headers and column titles.
+    2. Prioritize extraction accuracy. If a field is present, make every effort to extract it rather than returning empty values. Do not return null; use empty string ("") or 0 for missing quantities.
+    3. Extract and normalize the following fields:
+       - date: Look for headers like "Date", "Run Date", "Created Date", or similar. Normalize to YYYY-MM-DD format.
+       - shift: Look for "Shift" (Morning Shift, Afternoon Shift, Night Shift, or I/II/III). Normalize "I" or "Morning" to "Morning Shift", "II" or "Afternoon" to "Afternoon Shift", "III" or "Night" to "Night Shift".
+       - employeeNumber: Look for "Emp. No", "Employee ID", "Operator", or "Inspector ID".
+       - operationCode: Look for "Opn Code", "Operation", "Task Code", or "OP-XX".
+       - machineNumber: Look for "Machine No.", "Machine ID", "Asset", or "Robot".
+       - workOrderNumber: Look for "Work Order No.", "WO#", "Batch ID", or "Order ID".
+       - quantityProduced: Look for "Qty. Prod.", "Quantity", "Yield Count", or "Total Units". Parse as an integer.
+       - timeTaken: Look for "Time taken (in hrs)", "Duration", "Hours worked", or "Time taken".
+    4. If there are multiple rows or tables, extract the details from the first row or the main summary entry.
+    5. Transcribe all text in the sheet and populate "rawTextTranscription".
+
+    Instructions for Confidence Scores:
+    Estimate a realistic confidence score (0.00 to 1.00) for each field according to these legibility guidelines:
+    - 0.95 - 1.00: The text is clearly printed, legible, and directly matches the header.
+    - 0.80 - 0.94: Legible handwriting or hand-filled form text that is readable.
+    - 0.50 - 0.79: Partially obscured, blurry, uncertain, or degraded text.
+    - 0.00: The field is completely missing or illegible in the document.
   `;
 
   console.log(`[GEMINI] Sending request (${fileBuffer.length} bytes, ${mimeType})...`);
